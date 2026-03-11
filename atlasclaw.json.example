@@ -51,7 +51,7 @@
         "_comment": "One external caller. sk_env points to the shared secret variable, typically defined in .env.",
         "system_id": "smartcmp-preapproval",
         "enabled": true,
-        "sk_env": "UNICLAW_WEBHOOK_SK_SMARTCMP_PREAPPROVAL",
+        "sk_env": "ATLASCLAW_WEBHOOK_SK_SMARTCMP_PREAPPROVAL",
         "default_agent_id": "main",
         "allowed_skills": [
           "smartcmp:preapproval-agent"
