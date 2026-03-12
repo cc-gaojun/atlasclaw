@@ -24,11 +24,11 @@
   },
   "webhook": {
     "enabled": true,
-    "header_name": "X-UniClaw-SK",
+    "header_name": "X-AtlasClaw-SK",
     "skill_sources": [
       {
         "provider": "smartcmp",
-        "root": "../UniClaw-Providers/SmartCMP-Provider/skills"
+        "root": "../AtlasClaw-Providers/SmartCMP-Provider/skills"
       },
       {
         "provider": "jira",

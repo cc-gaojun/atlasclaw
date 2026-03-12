@@ -1,5 +1,5 @@
 {
-  "_comment": "Example UniClaw configuration. This file stays valid JSON by using _comment fields instead of // comments.",
+  "_comment": "Example AtlasClaw configuration. This file stays valid JSON by using _comment fields instead of // comments.",
 
   "model": {
     "_comment": "Primary LLM configuration. Replace provider/model and env vars to match your deployment.",
@@ -33,17 +33,17 @@
   "webhook": {
     "_comment": "Inbound webhook dispatch for provider-qualified markdown skills such as smartcmp:preapproval-agent.",
     "enabled": true,
-    "header_name": "X-UniClaw-SK",
+    "header_name": "X-AtlasClaw-SK",
     "skill_sources": [
       {
         "_comment": "External SmartCMP provider skills, addressed as smartcmp:<skill-name>.",
         "provider": "smartcmp",
-        "root": "../UniClaw-Providers/SmartCMP-Provider/skills"
+        "root": "../AtlasClaw-Providers/SmartCMP-Provider/skills"
       },
       {
         "_comment": "Built-in Jira markdown skills, addressed as jira:<skill-name> when exposed through webhook.",
         "provider": "jira",
-        "root": "app/uniclaw/providers/jira/skills"
+        "root": "app/atlasclaw/providers/jira/skills"
       }
     ],
     "systems": [

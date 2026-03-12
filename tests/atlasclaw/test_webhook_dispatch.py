@@ -80,7 +80,7 @@ def _build_client(tmp_path: Path, monkeypatch, *, allowed_skills: list[str]) -> 
 
     webhook_config = WebhookConfig(
         enabled=True,
-        header_name="X-UniClaw-SK",
+        header_name="X-AtlasClaw-SK",
         skill_sources=[
             WebhookSkillSourceConfig(provider="smartcmp", root=str(tmp_path / "skills"))
         ],
@@ -162,7 +162,7 @@ class TestWebhookDispatchAPI:
 
         resp = client.post(
             "/api/webhook/dispatch",
-            headers={"X-UniClaw-SK": "secret-1"},
+            headers={"X-AtlasClaw-SK": "secret-1"},
             json={
                 "skill": "smartcmp:preapproval-agent",
                 "args": {"approval_id": "A-10001", "agent_identity": "agent-approver"},
@@ -185,7 +185,7 @@ class TestWebhookDispatchAPI:
 
         resp = client.post(
             "/api/webhook/dispatch",
-            headers={"X-UniClaw-SK": "bad-secret"},
+            headers={"X-AtlasClaw-SK": "bad-secret"},
             json={"skill": "smartcmp:preapproval-agent", "args": {}},
         )
 
@@ -200,7 +200,7 @@ class TestWebhookDispatchAPI:
 
         resp = client.post(
             "/api/webhook/dispatch",
-            headers={"X-UniClaw-SK": "secret-1"},
+            headers={"X-AtlasClaw-SK": "secret-1"},
             json={"skill": "smartcmp:request", "args": {}},
         )
 
@@ -215,7 +215,7 @@ class TestWebhookDispatchAPI:
 
         resp = client.post(
             "/api/webhook/dispatch",
-            headers={"X-UniClaw-SK": "secret-1"},
+            headers={"X-AtlasClaw-SK": "secret-1"},
             json={"skill": "jira_issue_get", "args": {}},
         )
 

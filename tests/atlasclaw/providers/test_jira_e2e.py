@@ -193,13 +193,13 @@ def created_issue_key(jira_client: httpx.Client, project_key: str, api_version: 
 
 @pytest.fixture(scope="module")
 def api_base_url() -> str:
-    """UniClaw API base URL."""
+    """AtlasClaw API base URL."""
     return os.environ.get("ATLASCLAW_API_URL", "http://127.0.0.1:8000")
 
 
 @pytest.fixture(scope="module")
 def api_client(api_base_url: str):
-    """HTTP client for UniClaw API."""
+    """HTTP client for AtlasClaw API."""
     with httpx.Client(
         base_url=api_base_url,
         timeout=120.0,

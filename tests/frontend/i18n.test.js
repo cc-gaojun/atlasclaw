@@ -115,7 +115,7 @@ describe('i18n Module', () => {
     describe('t (translate)', () => {
         test('should return translation for valid key', async () => {
             const mockTranslations = {
-                app: { title: 'UniClaw AI', greeting: 'Hello {{name}}' }
+                app: { title: 'AtlasClaw AI', greeting: 'Hello {{name}}' }
             };
             
             global.fetch.mockResolvedValueOnce({
@@ -125,7 +125,7 @@ describe('i18n Module', () => {
             
             const { loadLocale, t } = await import('../../app/frontend/scripts/i18n.js');
             await loadLocale('zh-CN');
-            expect(t('app.title')).toBe('UniClaw AI');
+            expect(t('app.title')).toBe('AtlasClaw AI');
         });
 
         test('should return key for missing translation', async () => {

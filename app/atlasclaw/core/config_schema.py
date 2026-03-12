@@ -145,7 +145,7 @@ class WebhookSystemConfig(BaseModel):
 class WebhookConfig(BaseModel):
     """Inbound webhook dispatch configuration."""
     enabled: bool = False
-    header_name: str = "X-UniClaw-SK"
+    header_name: str = "X-AtlasClaw-SK"
     skill_sources: list[WebhookSkillSourceConfig] = Field(default_factory=list)
     systems: list[WebhookSystemConfig] = Field(default_factory=list)
 
