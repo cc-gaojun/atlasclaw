@@ -572,8 +572,11 @@ single MD Skill.
             )
             return
 
+        # Get provider_type from skill metadata
+        provider_type = (str(entry.metadata.get("provider_type", "")).strip() or entry.provider or None)
+        
         try:
-            handler = self._load_handler_from_file(py_file, attr_name)
+            handler = self._load_handler_from_file(py_file, attr_name, provider_type)
         except Exception as exc:
             logger.warning(
                 "Skipping md tool %s from %s: failed loading handler %s (%s)",
@@ -592,7 +595,7 @@ single MD Skill.
             description=description,
             category=str(entry.metadata.get("category", "skill")),
             location=entry.location,
-            provider_type=(str(entry.metadata.get("provider_type", "")).strip() or entry.provider or None),
+            provider_type=provider_type,
             instance_required=str(entry.metadata.get("instance_required", "")).lower() in ("1", "true", "yes"),
         )
         self.register(meta, handler)
@@ -606,7 +609,7 @@ single MD Skill.
         return entrypoint.strip(), "handler"
 
     @staticmethod
-    def _load_handler_from_file(py_file: Path, attr_name: str) -> Callable:
+    def _load_handler_from_file(py_file: Path, attr_name: str, provider_type: Optional[str] = None) -> Callable:
         import sys
 
         scripts_dir = str(py_file.parent)
@@ -619,7 +622,7 @@ single MD Skill.
             # If attr_name is the default "handler", assume it's a script wrapper case
             # Don't try to load the module, just create a wrapper
             if attr_name == "handler":
-                return SkillRegistry._create_script_wrapper(py_file)
+                return SkillRegistry._create_script_wrapper(py_file, provider_type)
             
             module_hash = hashlib.sha1(str(py_file).encode("utf-8")).hexdigest()[:12]
             module_name = f"atlasclaw_md_skill_{module_hash}_{py_file.stem}"
@@ -635,7 +638,7 @@ single MD Skill.
                 return handler
             
             # If no callable found, create a script wrapper
-            return SkillRegistry._create_script_wrapper(py_file)
+            return SkillRegistry._create_script_wrapper(py_file, provider_type)
         finally:
             if inserted:
                 try:
@@ -644,12 +647,16 @@ single MD Skill.
                     pass
     
     @staticmethod
-    def _create_script_wrapper(py_file: Path) -> Callable:
+    def _create_script_wrapper(py_file: Path, provider_type: Optional[str] = None) -> Callable:
         """Create a wrapper function that executes a script file.
         
         This allows any script (Python, Bash, etc.) to be used as a skill tool.
         The script will be executed with environment variables from the selected
         provider instance if available.
+        
+        Args:
+            py_file: Path to the script file
+            provider_type: Optional provider type (e.g., 'smartcmp') to select the right instance
         """
         import subprocess
         import sys
@@ -668,9 +675,15 @@ single MD Skill.
             # Inject provider instance configuration from ctx.deps.extra if available
             if ctx is not None and hasattr(ctx, 'deps') and hasattr(ctx.deps, 'extra'):
                 extra = ctx.deps.extra
+                
+                # Debug: Print all deps info
+                print(f"[DEBUG] Tool execution: provider_type={provider_type}")
+                print(f"[DEBUG] ctx.deps.extra keys: {list(extra.keys())}")
+                
                 # Check for selected provider instance
                 provider_instance = extra.get('provider_instance')
                 if provider_instance:
+                    print(f"[DEBUG] Using selected provider_instance: {provider_instance}")
                     # Inject all provider instance config as environment variables
                     for key, value in provider_instance.items():
                         if value is not None and key not in ('password', 'token', 'secret'):
@@ -678,20 +691,38 @@ single MD Skill.
                         elif value is not None and key in ('cookie',):
                             # For cookie, set as-is
                             env[key.upper()] = str(value)
-                # Also check provider_instances for default instance
+                # Check provider_instances for matching provider_type
                 elif 'provider_instances' in extra:
                     provider_instances = extra['provider_instances']
-                    # Find first available provider instance
-                    for provider_type, instances in provider_instances.items():
+                    print(f"[DEBUG] Available provider_types: {list(provider_instances.keys())}")
+                    
+                    # If tool has a specific provider_type, use it; otherwise find first available
+                    target_provider = provider_type
+                    if target_provider and target_provider in provider_instances:
+                        instances = provider_instances[target_provider]
+                        print(f"[DEBUG] Found instances for {target_provider}: {list(instances.keys())}")
                         if instances:
-                            # Use the first/default instance
                             default_instance = list(instances.values())[0]
+                            print(f"[DEBUG] Using instance config: {list(default_instance.keys())}")
                             for key, value in default_instance.items():
                                 if value is not None and key not in ('password', 'token', 'secret'):
                                     env[key.upper()] = str(value)
+                                    print(f"[DEBUG] Set env var: {key.upper()}={str(value)[:50]}...")
                                 elif value is not None and key in ('cookie',):
                                     env[key.upper()] = str(value)
-                            break
+                                    print(f"[DEBUG] Set env var: {key.upper()}={str(value)[:50]}...")
+                    else:
+                        # Fall back to first available provider instance
+                        print(f"[DEBUG] No specific provider_type, using first available")
+                        for pt, instances in provider_instances.items():
+                            if instances:
+                                default_instance = list(instances.values())[0]
+                                for key, value in default_instance.items():
+                                    if value is not None and key not in ('password', 'token', 'secret'):
+                                        env[key.upper()] = str(value)
+                                    elif value is not None and key in ('cookie',):
+                                        env[key.upper()] = str(value)
+                                break
             
             # Add any kwargs as environment variables
             for key, value in kwargs.items():
