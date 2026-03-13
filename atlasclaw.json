@@ -13,16 +13,11 @@
     }
   },
   "service_providers": {
-    "jira": {
-      "dev": {
-        "base_url": "http://192.168.1.107:8080/",
-        "username": "${JIRA_USERNAME}",
-        "password": "${JIRA_PASSWORD}",
-        "api_version": "2",
-        "default_project": "TEST"
-      }
-    },
     "smartcmp": {
+      "local": {
+        "base_url": "${SMARTCMP_LOCAL_URL}",
+        "cookie": "${SMARTCMP_LOCAL_COOKIE}"
+      },
       "default": {
         "cmp_url": "${CMP_URL}",
         "cmp_cookie": "${CMP_COOKIE}",
