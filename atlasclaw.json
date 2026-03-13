@@ -19,8 +19,8 @@
         "cookie": "${SMARTCMP_LOCAL_COOKIE}"
       },
       "default": {
-        "cmp_url": "${SMARTCMP_URL}",
-        "cmp_cookie": "${SMARTCMP_COOKIE}"
+        "CMP_URL": "${CMP_URL}",
+        "CMP_COOKIE": "${CMP_COOKIE}"
       }
     }
   },
