@@ -1,7 +1,9 @@
-﻿# AtlasClaw
-
 > [!NOTE]
-> This repository contains the AtlasClaw core implementation, including the agent runtime, API layer, channel adapters, provider registry, skills, tools, and session/memory management.
+> This repository contains the AtlasClaw core implementation, including the agent runtime, API layer, channel adapters, provider registry, skills, tools, and session/memory management，see [atlasclaw.ai](https://atlasclaw.ai/).
+
+# AtlasClaw
+
+![AtlasClaw logo](docs/images/architecture/atlasclaw-logo.png)
 
 AtlasClaw is an enterprise agent framework that lets employees interact with multiple enterprise systems through one conversational AI interface. Instead of switching between separate consoles, dashboards, and approval portals, users can use natural language to trigger workflows, query operational data, and complete cross-system tasks from a single entry point.
 
