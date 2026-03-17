@@ -325,3 +325,83 @@ class TestWeComHandlerMessageCallback:
         call_args = callback.call_args[0][0]
         assert isinstance(call_args, InboundMessage)
         assert call_args.content == "Hello"
+
+
+class TestWeComConnectionMode:
+    """Tests for WeCom connection_mode feature."""
+
+    def test_schema_has_connection_mode(self):
+        """Test schema includes connection_mode field."""
+        handler = WeComHandler()
+        schema = handler.describe_schema()
+        
+        assert "connection_mode" in schema["properties"]
+        cm = schema["properties"]["connection_mode"]
+        assert cm["type"] == "string"
+        assert cm["enum"] == ["websocket", "webhook"]
+        assert cm["default"] == "websocket"
+        assert "enumLabels" in cm
+
+    def test_schema_has_required_by_mode(self):
+        """Test schema includes required_by_mode."""
+        handler = WeComHandler()
+        schema = handler.describe_schema()
+        
+        assert "required_by_mode" in schema
+        rbm = schema["required_by_mode"]
+        assert "websocket" in rbm
+        assert "webhook" in rbm
+        assert "bot_id" in rbm["websocket"]
+        assert "bot_secret" in rbm["websocket"]
+        assert "webhook_url" in rbm["webhook"]
+
+    def test_schema_fields_have_show_when(self):
+        """Test fields have showWhen conditions."""
+        handler = WeComHandler()
+        schema = handler.describe_schema()
+        props = schema["properties"]
+        
+        # WebSocket mode fields
+        assert props["bot_id"]["showWhen"] == {"connection_mode": "websocket"}
+        assert props["bot_secret"]["showWhen"] == {"connection_mode": "websocket"}
+        
+        # Webhook mode fields
+        assert props["webhook_url"]["showWhen"] == {"connection_mode": "webhook"}
+
+    @pytest.mark.asyncio
+    async def test_validate_config_websocket_mode(self):
+        """Test validation for websocket mode."""
+        handler = WeComHandler()
+        
+        # Valid websocket config
+        result = await handler.validate_config({
+            "connection_mode": "websocket",
+            "bot_id": "test_bot_id",
+            "bot_secret": "test_bot_secret"
+        })
+        assert result.valid is True
+        
+        # Invalid websocket config (missing bot_secret)
+        result = await handler.validate_config({
+            "connection_mode": "websocket",
+            "bot_id": "test_bot_id"
+        })
+        assert result.valid is False
+
+    @pytest.mark.asyncio
+    async def test_validate_config_webhook_mode(self):
+        """Test validation for webhook mode."""
+        handler = WeComHandler()
+        
+        # Valid webhook config
+        result = await handler.validate_config({
+            "connection_mode": "webhook",
+            "webhook_url": "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=xxx"
+        })
+        assert result.valid is True
+        
+        # Invalid webhook config (missing webhook_url)
+        result = await handler.validate_config({
+            "connection_mode": "webhook"
+        })
+        assert result.valid is False

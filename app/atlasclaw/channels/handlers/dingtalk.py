@@ -436,15 +436,29 @@ class DingTalkHandler(ChannelHandler):
             errors.append("Config must be a dictionary")
             return ChannelValidationResult(valid=False, errors=errors)
         
-        webhook_url = config.get("webhook_url")
-        client_id = config.get("client_id") or config.get("app_key")
-        client_secret = config.get("client_secret") or config.get("app_secret")
+        connection_mode = config.get("connection_mode", "webhook")
         
-        if not webhook_url and not client_id:
-            errors.append("Either webhook_url or client_id/app_key is required")
-        
-        if client_id and not client_secret:
-            errors.append("client_secret/app_secret is required when using client_id/app_key")
+        if connection_mode == "webhook":
+            if not config.get("webhook_url"):
+                errors.append("webhook_url is required for Webhook mode")
+        elif connection_mode == "stream":
+            client_id = config.get("client_id") or config.get("app_key")
+            client_secret = config.get("client_secret") or config.get("app_secret")
+            if not client_id:
+                errors.append("client_id/app_key is required for Stream mode")
+            if not client_secret:
+                errors.append("client_secret/app_secret is required for Stream mode")
+        else:
+            # Fallback: legacy validation
+            webhook_url = config.get("webhook_url")
+            client_id = config.get("client_id") or config.get("app_key")
+            client_secret = config.get("client_secret") or config.get("app_secret")
+            
+            if not webhook_url and not client_id:
+                errors.append("Either webhook_url or client_id/app_key is required")
+            
+            if client_id and not client_secret:
+                errors.append("client_secret/app_secret is required when using client_id/app_key")
         
         return ChannelValidationResult(valid=len(errors) == 0, errors=errors)
     
@@ -453,32 +467,50 @@ class DingTalkHandler(ChannelHandler):
         return {
             "type": "object",
             "title": "DingTalk",
-            "description": "DingTalk bot configuration (Stream mode or Webhook)",
-            "oneOf_hint": "client_id or webhook_url",
+            "description": "DingTalk bot configuration",
             "properties": {
+                "connection_mode": {
+                    "type": "string",
+                    "title": "Connection Mode",
+                    "description": "Select connection mode",
+                    "enum": ["stream", "webhook"],
+                    "enumLabels": {
+                        "stream": "Stream Mode (Enterprise Bot)",
+                        "webhook": "Webhook Robot"
+                    },
+                    "default": "stream",
+                },
                 "client_id": {
                     "type": "string",
                     "title": "Client ID (AppKey)",
-                    "description": "Application AppKey for Stream mode (recommended)",
+                    "description": "Application AppKey for Stream mode",
                     "placeholder": "dingxxxxxxxxxx",
+                    "showWhen": {"connection_mode": "stream"},
                 },
                 "client_secret": {
                     "type": "string",
                     "title": "Client Secret (AppSecret)",
-                    "description": "Application AppSecret (required with Client ID)",
+                    "description": "Application AppSecret",
                     "placeholder": "Application secret",
+                    "showWhen": {"connection_mode": "stream"},
                 },
                 "webhook_url": {
                     "type": "string",
                     "title": "Webhook URL",
-                    "description": "Custom bot Webhook URL (outbound only)",
+                    "description": "Custom bot Webhook address",
                     "placeholder": "https://oapi.dingtalk.com/robot/send?access_token=xxx",
+                    "showWhen": {"connection_mode": "webhook"},
                 },
                 "secret": {
                     "type": "string",
                     "title": "Signing Secret",
                     "description": "Webhook signing secret (optional)",
                     "placeholder": "SEC...",
+                    "showWhen": {"connection_mode": "webhook"},
                 },
+            },
+            "required_by_mode": {
+                "stream": ["client_id", "client_secret"],
+                "webhook": ["webhook_url"]
             },
         }

@@ -276,7 +276,12 @@ class FeishuHandler(ChannelHandler):
     async def send_message(self, outbound: OutboundMessage) -> SendResult:
         """Send message to Feishu."""
         try:
-            # Get fresh access token
+            # Check if using Webhook mode
+            webhook_url = self.config.get("webhook_url")
+            if webhook_url:
+                return await self._send_via_webhook(outbound, webhook_url)
+            
+            # Long connection mode - use API
             if not await self._refresh_access_token():
                 return SendResult(success=False, error="Failed to get access token")
             
@@ -310,6 +315,32 @@ class FeishuHandler(ChannelHandler):
                         
         except Exception as e:
             logger.error(f"Failed to send Feishu message: {e}")
+            return SendResult(success=False, error=str(e))
+    
+    async def _send_via_webhook(self, outbound: OutboundMessage, webhook_url: str) -> SendResult:
+        """Send message via Webhook (custom bot)."""
+        try:
+            payload = {
+                "msg_type": "text",
+                "content": {"text": outbound.content}
+            }
+            
+            async with aiohttp.ClientSession() as session:
+                async with session.post(webhook_url, json=payload) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        if data.get("code") == 0 or data.get("StatusCode") == 0:
+                            logger.info("Feishu webhook message sent")
+                            return SendResult(success=True)
+                        else:
+                            return SendResult(
+                                success=False,
+                                error=f"Feishu webhook error: {data.get('msg', data.get('StatusMessage'))}"
+                            )
+                    else:
+                        return SendResult(success=False, error=f"HTTP {response.status}")
+        except Exception as e:
+            logger.error(f"Failed to send Feishu webhook message: {e}")
             return SendResult(success=False, error=str(e))
     
     async def _refresh_access_token(self) -> bool:
@@ -390,10 +421,16 @@ class FeishuHandler(ChannelHandler):
             errors.append("Config must be a dictionary")
             return ChannelValidationResult(valid=False, errors=errors)
         
-        if not config.get("app_id"):
-            errors.append("app_id is required")
-        if not config.get("app_secret"):
-            errors.append("app_secret is required")
+        connection_mode = config.get("connection_mode", "longconnection")
+        
+        if connection_mode == "longconnection":
+            if not config.get("app_id"):
+                errors.append("app_id is required for Long Connection mode")
+            if not config.get("app_secret"):
+                errors.append("app_secret is required for Long Connection mode")
+        elif connection_mode == "webhook":
+            if not config.get("webhook_url"):
+                errors.append("webhook_url is required for Webhook mode")
         
         return ChannelValidationResult(valid=len(errors) == 0, errors=errors)
     
@@ -403,19 +440,42 @@ class FeishuHandler(ChannelHandler):
             "type": "object",
             "title": "Feishu",
             "description": "Feishu bot configuration",
-            "required": ["app_id", "app_secret"],
             "properties": {
+                "connection_mode": {
+                    "type": "string",
+                    "title": "Connection Mode",
+                    "description": "Select connection mode",
+                    "enum": ["longconnection", "webhook"],
+                    "enumLabels": {
+                        "longconnection": "Long Connection (Enterprise App)",
+                        "webhook": "Webhook (Custom Bot)"
+                    },
+                    "default": "longconnection",
+                },
                 "app_id": {
                     "type": "string",
                     "title": "App ID",
                     "description": "Feishu application App ID",
                     "placeholder": "cli_xxxxxxxxxx",
+                    "showWhen": {"connection_mode": "longconnection"},
                 },
                 "app_secret": {
                     "type": "string",
                     "title": "App Secret",
                     "description": "Feishu application App Secret",
                     "placeholder": "Your app secret",
+                    "showWhen": {"connection_mode": "longconnection"},
                 },
+                "webhook_url": {
+                    "type": "string",
+                    "title": "Webhook URL",
+                    "description": "Custom bot Webhook address",
+                    "placeholder": "https://open.feishu.cn/open-apis/bot/v2/hook/xxx",
+                    "showWhen": {"connection_mode": "webhook"},
+                },
+            },
+            "required_by_mode": {
+                "longconnection": ["app_id", "app_secret"],
+                "webhook": ["webhook_url"]
             },
         }

@@ -65,13 +65,13 @@
         "placeholder": "dingxxxxxxxxxx"
       },
       "client_id": {
-        "title": "Client ID (AppKey)",
-        "description": "Application AppKey for Stream mode (recommended)",
+        "title": "AppKey",
+        "description": "Application AppKey for Stream mode",
         "placeholder": "dingxxxxxxxxxx"
       },
       "client_secret": {
-        "title": "Client Secret (AppSecret)",
-        "description": "Application AppSecret (required with Client ID)",
+        "title": "AppSecret",
+        "description": "Application AppSecret for Stream mode",
         "placeholder": "Application secret"
       },
       "corpid": {
@@ -98,6 +98,22 @@
         "title": "Bot Secret",
         "description": "Intelligent robot secret (required with Bot ID)",
         "placeholder": "Bot secret"
+      },
+      "connection_mode": {
+        "title": "Connection Mode",
+        "description": "Select connection mode",
+        "webhook": {
+          "label": "Webhook (Custom Bot)"
+        },
+        "stream": {
+          "label": "Stream Mode (Enterprise Bot)"
+        },
+        "websocket": {
+          "label": "Long Connection (Intelligent Robot)"
+        },
+        "longconnection": {
+          "label": "Long Connection (Enterprise App)"
+        }
       }
     },
     "back": "← Back",
