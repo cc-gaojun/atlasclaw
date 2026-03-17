@@ -14,9 +14,15 @@ from typing import Optional
 class WorkspaceInitializer:
     """Initialize and manage workspace directory structure.
     
-    The workspace directory (default: ./.atlasclaw) contains all AtlasClaw user data
-    including agents, skills, channels, and user data. Providers are stored separately
-    in a sibling directory configured via providers_root.
+    The workspace directory (default: ./.atlasclaw, configurable) contains ONLY user
+    runtime data and the core configuration file. Code/config directories (providers,
+    skills, channels) are stored in sibling directories configured via *_root settings.
+    
+    Directory structure:
+    <workspace>/                 (default: ./.atlasclaw)
+    ├── atlasclaw.json           # Core configuration
+    ├── agents/                  # Agent definitions
+    └── users/                   # User data only
     """
     
     def __init__(self, workspace_path: str = "./.atlasclaw"):
@@ -32,11 +38,12 @@ class WorkspaceInitializer:
         """Initialize workspace directory structure.
         
         Creates the following structure:
-        <workspace>/                 (default: ./.atlasclaw)
-        ├── agents/
-        ├── skills/
-        ├── channels/
-        └── users/
+        <workspace>/                 (default: ./.atlasclaw, configurable)
+        ├── agents/                  # Agent definitions
+        └── users/                   # User data only
+        
+        Note: skills/ and channels/ are now external directories configured via
+        skills_root and channels_root in atlasclaw.json.
         
         Returns:
             True if initialization was successful.
@@ -45,8 +52,7 @@ class WorkspaceInitializer:
             # Create workspace directory structure
             self.workspace_path.mkdir(parents=True, exist_ok=True)
             (self.workspace_path / "agents").mkdir(exist_ok=True)
-            (self.workspace_path / "skills").mkdir(exist_ok=True)
-            (self.workspace_path / "channels").mkdir(exist_ok=True)
+            # skills/ and channels/ are now external (skills_root, channels_root)
             
             # Create users directory inside workspace
             self.users_dir.mkdir(exist_ok=True)
@@ -91,26 +97,26 @@ class WorkspaceInitializer:
         """Default SOUL.md content."""
         return '''---
 agent_id: "main"
-name: "企业助手"
+name: "Enterprise Assistant"
 version: "1.0"
 ---
 
-## 系统提示词
+## System Prompt
 
-你是企业的智能助手，帮助员工处理日常工作任务。
+You are an intelligent assistant for the enterprise, helping employees with daily work tasks.
 
-## 能力范围
+## Capabilities
 
-- 回答企业相关问题
-- 协助处理文档和数据
-- 提供技术支持
+- Answer enterprise-related questions
+- Assist with document and data processing
+- Provide technical support
 
-## 可用 Providers
+## Available Providers
 
 - jira
 - confluence
 
-## 可用 Skills
+## Available Skills
 
 - query_knowledge
 - create_ticket
@@ -122,19 +128,19 @@ version: "1.0"
 agent_id: "main"
 ---
 
-# IDENTITY.md - Agent 身份
+# IDENTITY.md - Agent Identity
 
-## 基本信息
+## Basic Information
 
-- **显示名称**: 小助手
-- **头像**: 🤖
-- **语气**: 专业、友好、简洁
+- **Display Name**: Assistant
+- **Avatar**: 🤖
+- **Tone**: Professional, Friendly, Concise
 
-## 交互风格
+## Interaction Style
 
-- 优先给出直接答案
-- 需要时提供详细解释
-- 使用中文回复
+- Provide direct answers first
+- Offer detailed explanations when needed
+- Respond in English
 '''
     
     def _default_user_md(self) -> str:
@@ -143,16 +149,16 @@ agent_id: "main"
 agent_id: "main"
 ---
 
-# USER.md - 用户交互方式
+# USER.md - User Interaction Mode
 
-## 个性化设置
+## Personalization Settings
 
-- 记住用户偏好
-- 根据用户角色调整回答深度
+- Remember user preferences
+- Adjust response depth based on user role
 
-## 主动行为
+## Proactive Behaviors
 
-- 检测到重要信息时主动提醒
+- Proactively notify when important information is detected
 '''
     
     def _default_memory_md(self) -> str:
@@ -161,25 +167,27 @@ agent_id: "main"
 agent_id: "main"
 ---
 
-# MEMORY.md - 记忆策略
+# MEMORY.md - Memory Strategy
 
-## 长期记忆
+## Long-term Memory
 
-- 自动提取：是
-- 提取触发：对话结束、关键决策点
+- Auto-extraction: Yes
+- Extraction triggers: Conversation end, key decision points
 
-## 上下文管理
+## Context Management
 
-- 最大轮数：20
-- 压缩策略：摘要 + 关键决策保留
+- Maximum rounds: 20
+- Compression strategy: Summary + Key decisions retention
 '''
     
     def is_initialized(self) -> bool:
-        """Check if workspace is initialized."""
+        """Check if workspace is initialized.
+        
+        Note: skills/ and channels/ are no longer required as they are external.
+        """
         return (
             self.workspace_path.exists()
             and (self.workspace_path / "agents").exists()
-            and (self.workspace_path / "skills").exists()
             and self.users_dir.exists()
         )
 
@@ -203,10 +211,12 @@ class UserWorkspaceInitializer:
         
         Creates the following structure:
         users/<user-id>/
-        ├── atlasclaw.json
-        ├── channels/
-        ├── sessions/
-        └── memory/
+        ├── user_setting.json       # User-specific configs (renamed from atlasclaw.json)
+        ├── sessions/               # JSONL session transcripts
+        └── memory/                 # Markdown memory files
+        
+        Note: channels/ is no longer created; user-level channel configs are stored
+        in user_setting.json instead.
         
         Returns:
             True if initialization was successful.
@@ -214,7 +224,7 @@ class UserWorkspaceInitializer:
         try:
             # Create user directory structure
             self.user_dir.mkdir(parents=True, exist_ok=True)
-            (self.user_dir / "channels").mkdir(exist_ok=True)
+            # channels/ is no longer created; user-level channel configs go in user_setting.json
             (self.user_dir / "sessions").mkdir(exist_ok=True)
             (self.user_dir / "memory").mkdir(exist_ok=True)
             
@@ -227,14 +237,14 @@ class UserWorkspaceInitializer:
             return False
     
     def _create_default_user_config(self) -> None:
-        """Create default user atlasclaw.json if it doesn't exist."""
-        user_config_path = self.user_dir / "atlasclaw.json"
+        """Create default user_setting.json if it doesn't exist."""
+        user_config_path = self.user_dir / "user_setting.json"
         if user_config_path.exists():
             return
         
         default_config = {
-            "providers": {},
-            "skills": {}
+            "channels": {},       # User-level channel configs (Feishu bot, etc.)
+            "preferences": {}     # User preferences (language, timezone, etc.)
         }
         
         try:
@@ -244,10 +254,13 @@ class UserWorkspaceInitializer:
             print(f"[UserWorkspaceInitializer] Failed to create user config: {e}")
     
     def is_initialized(self) -> bool:
-        """Check if user workspace is initialized."""
+        """Check if user workspace is initialized.
+        
+        Note: channels/ is no longer required as user-level channel configs
+        are stored in user_setting.json.
+        """
         return (
             self.user_dir.exists()
-            and (self.user_dir / "channels").exists()
             and (self.user_dir / "sessions").exists()
             and (self.user_dir / "memory").exists()
         )

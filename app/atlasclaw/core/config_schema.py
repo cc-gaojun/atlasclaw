@@ -196,7 +196,21 @@ class MemoryConfig(BaseModel):
 class WorkspaceConfig(BaseModel):
     """Workspace configuration"""
     path: str = Field(default="./.atlasclaw", description="Workspace path, defaults to ./.atlasclaw directory")
-    per_user_isolation: bool = Field(default=True, description="Whether to isolate data per user")
+
+
+class UserConfig(BaseModel):
+    """User-specific configuration stored in users/<id>/user_setting.json
+    
+    Note: providers are system-level configuration, not user-level.
+    """
+    channels: dict[str, Any] = Field(
+        default_factory=dict,
+        description="User-level channel configurations (e.g., Feishu bot, DingTalk bot)"
+    )
+    preferences: dict[str, Any] = Field(
+        default_factory=dict,
+        description="General user preferences (language, timezone, etc.)"
+    )
 
 
 class AtlasClawConfig(BaseModel):
@@ -207,6 +221,14 @@ class AtlasClawConfig(BaseModel):
     providers_root: str = Field(
         default="../providers",
         description="Root directory for provider templates and skills, resolved relative to atlasclaw.json",
+    )
+    skills_root: str = Field(
+        default="../skills",
+        description="Root directory for standalone skills (not tied to providers), resolved relative to atlasclaw.json",
+    )
+    channels_root: str = Field(
+        default="../channels",
+        description="Root directory for system-level channel configurations, resolved relative to atlasclaw.json",
     )
     
     # Nested configuration sections

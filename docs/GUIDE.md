@@ -219,7 +219,7 @@ Configure inbound webhooks for provider-qualified skills already loaded from `pr
 
 ```json
 {
-  "providers_root": "../providers",
+  "providers_root": "../atlasclaw-providers/providers",
   "webhook": {
     "enabled": true,
     "header_name": "X-AtlasClaw-SK",

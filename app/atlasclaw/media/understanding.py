@@ -414,7 +414,7 @@ class DocumentExtractor(MediaUnderstandingProvider):
                     text_parts.append(row_text)
             return "\n".join(text_parts)
         except ImportError:
-            return f"[Excel 提取需要 openpyxl 库: {path.name}]"
+            return f"[Excel extraction requires openpyxl library: {path.name}]"
 
 
 class MediaUnderstandingHandler:

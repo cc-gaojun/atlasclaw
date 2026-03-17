@@ -69,29 +69,35 @@ A **Workspace** is the root organizational unit containing all AtlasClaw resourc
 
 ```
 <project_root>/
+├── providers/                           # External providers (enterprise integrations)
+│   └── <provider_name>/
+│       ├── PROVIDER.md
+│       ├── auth/
+│       ├── channels/
+│       └── skills/
+├── skills/                              # External standalone skills (third-party)
+│   └── <skill_name>/
+│       └── SKILL.md
+├── channels/                            # External system-level channel configs
+│   └── <channel_name>/
+│       └── config.json
 ├── .atlasclaw/                          # Workspace directory (default)
+│   ├── atlasclaw.json                   # Core configuration
 │   ├── agents/                          # Agent definitions
 │   │   └── main/                        # Default agent
 │   │       ├── SOUL.md                  # System prompt & capabilities
 │   │       ├── IDENTITY.md              # Agent identity
 │   │       ├── USER.md                  # Interaction style
 │   │       └── MEMORY.md                # Memory strategy
-│   ├── providers/                       # Provider configurations
-│   ├── skills/                          # Workspace-level skills
-│   │   └── <skill-name>/
-│   │       ├── SKILL.md                 # Skill metadata
-│   │       └── scripts/                 # Skill implementation
-│   ├── channels/                        # Channel configurations
 │   └── users/                           # User directories
 │       └── <user-id>/                   # Per-user directory
-│           ├── atlasclaw.json           # User-specific configuration
-│           ├── channels/                # User channel configs
+│           ├── user_setting.json        # User-specific configuration
 │           ├── sessions/                # Session storage
 │           │   ├── sessions.json        # Session metadata
 │           │   ├── <session-id>.jsonl   # Transcript files
 │           │   └── archive/             # Archived transcripts
 │           └── memory/                  # Long-term memory storage
-├── atlasclaw.json                       # Project configuration
+├── atlasclaw.json                       # Project configuration (symlink or copy)
 └── .gitignore                           # Git ignore rules
 ```
 

@@ -38,7 +38,12 @@ class TestConfigWorkspaceLoading:
         assert config.model.primary == "workspace-model"
 
     def test_load_user_config(self, tmp_path):
-        """场景：加载用户区配置"""
+        """场景：加载用户区配置
+        
+        用户配置存储在 user_setting.json 中，包含 channels, preferences。
+        注意：providers 是系统级配置，不在用户配置中。
+        支持向后兼容旧格式 atlasclaw.json。
+        """
         # Create workspace config with workspace path
         workspace_config = {
             "model": {"primary": "workspace-model"}, 
@@ -49,11 +54,15 @@ class TestConfigWorkspaceLoading:
         with open(workspace_config_path, "w") as f:
             json.dump(workspace_config, f)
 
-        # Create user config
-        user_config = {"model": {"primary": "user-model"}}
+        # Create user config (new format)
+        user_config = {
+            "channels": {"feishu": {"connections": []}},
+            "providers": {},
+            "preferences": {"language": "zh-CN"}
+        }
         users_dir = tmp_path / "users" / "test_user"
         users_dir.mkdir(parents=True)
-        user_config_path = users_dir / "atlasclaw.json"
+        user_config_path = users_dir / "user_setting.json"
         with open(user_config_path, "w") as f:
             json.dump(user_config, f)
 
@@ -61,9 +70,42 @@ class TestConfigWorkspaceLoading:
         config_manager = ConfigManager(config_path=str(workspace_config_path))
         config_manager.load()
 
-        # Load user config (raw, not merged)
+        # Load user config
         user_config_loaded = config_manager.load_user_config("test_user")
-        assert user_config_loaded.get("model", {}).get("primary") == "user-model"
+        assert user_config_loaded.get("channels", {}).get("feishu") is not None
+        assert user_config_loaded.get("preferences", {}).get("language") == "zh-CN"
+    
+    def test_load_user_config_legacy_format(self, tmp_path):
+        """场景：向后兼容旧格式 atlasclaw.json"""
+        # Create workspace config
+        workspace_config = {
+            "model": {"primary": "workspace-model"},
+            "workspace": {"path": str(tmp_path)}
+        }
+        workspace_config_path = tmp_path / "atlasclaw.json"
+        with open(workspace_config_path, "w") as f:
+            json.dump(workspace_config, f)
+
+        # Create user config (legacy format - atlasclaw.json)
+        # Note: providers field in legacy format will be ignored as providers are system-level
+        legacy_user_config = {
+            "channels": {"slack": {"connections": []}},
+            "preferences": {"theme": "dark"}
+        }
+        users_dir = tmp_path / "users" / "legacy_user"
+        users_dir.mkdir(parents=True)
+        user_config_path = users_dir / "atlasclaw.json"  # Legacy format
+        with open(user_config_path, "w") as f:
+            json.dump(legacy_user_config, f)
+
+        # Load config
+        config_manager = ConfigManager(config_path=str(workspace_config_path))
+        config_manager.load()
+
+        # Load user config - should convert legacy format
+        user_config_loaded = config_manager.load_user_config("legacy_user")
+        assert "channels" in user_config_loaded
+        assert "preferences" in user_config_loaded
 
     def test_config_merge_priority(self, tmp_path):
         """场景：验证配置优先级（工作区 > 全局 > 默认）"""
@@ -115,15 +157,13 @@ class TestWorkspaceConfigSchema:
 
         config = WorkspaceConfig()
         assert config.path == "./.atlasclaw"
-        assert config.per_user_isolation is True
 
     def test_workspace_config_custom_values(self):
-        """场景：验证 WorkspaceConfig 自定义值"""
+        """Test: Verify WorkspaceConfig custom values"""
         from app.atlasclaw.core.config_schema import WorkspaceConfig
 
-        config = WorkspaceConfig(path="/custom/path", per_user_isolation=False)
+        config = WorkspaceConfig(path="/custom/path")
         assert config.path == "/custom/path"
-        assert config.per_user_isolation is False
 
 
 class TestConfigManagerIntegration:

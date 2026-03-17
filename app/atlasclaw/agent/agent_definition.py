@@ -16,7 +16,7 @@ from typing import Optional, Any
 class AgentConfig:
     """Agent configuration object."""
     agent_id: str = "main"
-    name: str = "助手"
+    name: str = "Assistant"
     version: str = "1.0"
     
     # From SOUL.md
@@ -26,7 +26,7 @@ class AgentConfig:
     allowed_skills: list[str] = field(default_factory=list)
     
     # From IDENTITY.md
-    display_name: str = "助手"
+    display_name: str = "Assistant"
     avatar: str = "🤖"
     tone: str = "professional"
     
@@ -82,7 +82,7 @@ class AgentDefinitionParser:
         frontmatter, body = cls.parse_frontmatter(content)
         result = dict(frontmatter)
 
-        # Extract system prompt (支持中英文)
+        # Extract system prompt (supports both English and Chinese)
         system_prompt_match = re.search(
             r'##\s*(?:System Prompt|系统提示词)\s*\n(.*?)(?=##|\Z)',
             body,
@@ -91,7 +91,7 @@ class AgentDefinitionParser:
         if system_prompt_match:
             result['system_prompt'] = system_prompt_match.group(1).strip()
 
-        # Extract capabilities (支持中英文)
+        # Extract capabilities (supports both English and Chinese)
         capabilities_match = re.search(
             r'##\s*(?:Capabilities|能力范围)\s*\n(.*?)(?=##|\Z)',
             body,
@@ -105,7 +105,7 @@ class AgentDefinitionParser:
                 if line.strip().startswith('-')
             ]
 
-        # Extract allowed providers (支持中英文)
+        # Extract allowed providers (supports both English and Chinese)
         providers_match = re.search(
             r'##\s*(?:Available Providers|可用 Providers?)\s*\n(.*?)(?=##|\Z)',
             body,
@@ -119,7 +119,7 @@ class AgentDefinitionParser:
                 if line.strip().startswith('-')
             ]
 
-        # Extract allowed skills (支持中英文)
+        # Extract allowed skills (supports both English and Chinese)
         skills_match = re.search(
             r'##\s*(?:Available Skills|可用 Skills?)\s*\n(.*?)(?=##|\Z)',
             body,
@@ -141,7 +141,7 @@ class AgentDefinitionParser:
         frontmatter, body = cls.parse_frontmatter(content)
         result = dict(frontmatter)
 
-        # Extract display name (支持中英文)
+        # Extract display name (supports both English and Chinese)
         name_match = re.search(
             r'\*\*(?:Display Name|显示名称)\*\*[:：]\s*(.+)',
             body
@@ -149,7 +149,7 @@ class AgentDefinitionParser:
         if name_match:
             result['display_name'] = name_match.group(1).strip()
 
-        # Extract avatar (支持中英文)
+        # Extract avatar (supports both English and Chinese)
         avatar_match = re.search(
             r'\*\*(?:Avatar|头像)\*\*[:：]\s*(.+)',
             body
@@ -157,7 +157,7 @@ class AgentDefinitionParser:
         if avatar_match:
             result['avatar'] = avatar_match.group(1).strip()
 
-        # Extract tone (支持中英文)
+        # Extract tone (supports both English and Chinese)
         tone_match = re.search(
             r'\*\*(?:Tone|语气)\*\*[:：]\s*(.+)',
             body
@@ -173,7 +173,7 @@ class AgentDefinitionParser:
         frontmatter, body = cls.parse_frontmatter(content)
         result = dict(frontmatter)
 
-        # Store the interaction style section (支持中英文)
+        # Store the interaction style section (supports both English and Chinese)
         interaction_match = re.search(
             r'##\s*(?:Personalization|Personalization Settings|个性化设置)\s*\n(.*?)(?=##|\Z)',
             body,
@@ -190,7 +190,7 @@ class AgentDefinitionParser:
         frontmatter, body = cls.parse_frontmatter(content)
         result = dict(frontmatter)
 
-        # Extract memory strategy (支持中英文)
+        # Extract memory strategy (supports both English and Chinese)
         strategy_match = re.search(
             r'##\s*(?:Context Management|上下文管理)\s*\n(.*?)(?=##|\Z)',
             body,
@@ -199,7 +199,7 @@ class AgentDefinitionParser:
         if strategy_match:
             result['memory_strategy'] = strategy_match.group(1).strip()
 
-        # Extract max context rounds (支持中英文)
+        # Extract max context rounds (supports both English and Chinese)
         rounds_match = re.search(
             r'(?:Max Turns|最大轮数)[:：]\s*(\d+)',
             body
@@ -216,13 +216,13 @@ class AgentLoader:
     # Default agent configuration when files are missing
     DEFAULT_CONFIG = AgentConfig(
         agent_id="main",
-        name="助手",
+        name="Assistant",
         version="1.0",
-        system_prompt="你是企业的智能助手，帮助员工处理日常工作任务。",
-        capabilities=["回答问题", "提供技术支持"],
+        system_prompt="You are an intelligent assistant for the enterprise, helping employees with daily work tasks.",
+        capabilities=["Answer questions", "Provide technical support"],
         allowed_providers=[],
         allowed_skills=[],
-        display_name="小助手",
+        display_name="Assistant",
         avatar="🤖",
         tone="professional",
         interaction_style="",

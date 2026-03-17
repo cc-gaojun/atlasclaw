@@ -260,21 +260,18 @@ providers/                         # Provider repository (code/templates)
     ├── channels/
     └── skills/
 
-.atlasclaw/                        # Runtime workspace (user data only)
+<workspace>/                       # Runtime workspace (default: ./.atlasclaw)
 ├── agents/
 │   └── main/
 │       ├── SOUL.md                # Agent capabilities and behavior
 │       ├── IDENTITY.md            # Agent personality
 │       ├── USER.md                # User interaction patterns
 │       └── MEMORY.md              # Memory strategy
-├── skills/                        # Workspace-level skills
-├── channels/                      # Channel configurations
 └── users/
     └── <user_id>/
-        ├── atlasclaw.json         # Per-user config overrides
+        ├── user_setting.json      # User-specific config (channels, preferences)
         ├── sessions/              # JSONL session transcripts
-        ├── memory/                # Markdown memory files
-        └── channels/              # Per-user channel configs
+        └── memory/                # Markdown memory files
 ```
 
 ---
@@ -595,10 +592,11 @@ Providers are the primary extension point. A provider is a directory containing:
 **Instance Awareness**: A single provider type (e.g., "smartcmp") can have multiple instances (e.g., "production", "staging"). `ServiceProviderRegistry` wraps skill handlers with automatic instance selection logic.
 
 **Locations** (override priority):
-1. Workspace: `<workspace>/skills/`
-2. Providers: `<providers_root>/` (configured in atlasclaw.json, default: `../providers`)
-3. Global: `~/.atlasclaw/providers/`
-4. Built-in: `app/atlasclaw/providers/`
+1. Workspace: `<workspace>/skills/` (optional, for development)
+2. Global: `~/.atlasclaw/skills/`
+3. Skills root: `<skills_root>/` (configured in atlasclaw.json, default: `../atlasclaw-providers/skills`)
+4. Providers: `<providers_root>/<provider>/skills/` (configured in atlasclaw.json, default: `../atlasclaw-providers/providers`)
+5. Built-in: `app/atlasclaw/providers/`
 
 ### 9.2 Skill Extension
 
@@ -723,7 +721,11 @@ Configurable via `BlockChunkerConfig`, controls how streaming text is chunked fo
 ### 11.4 Configuration
 
 **Format**: JSON or YAML
-**Locations**: Project root (`atlasclaw.json`), workspace (`.atlasclaw/atlasclaw.json`), user home (`~/.atlasclaw/config.json`), per-user (`<workspace>/users/<user_id>/atlasclaw.json`)
+**Locations**: 
+- Project root (`atlasclaw.json`) — Core configuration
+- Workspace root (`<workspace>/atlasclaw.json`) — Workspace configuration
+- User home (`~/.atlasclaw/config.json`) — Global user configuration
+- Per-user (`<workspace>/users/<user_id>/user_setting.json`) — User-specific settings (channels, preferences)
 
 ---
 

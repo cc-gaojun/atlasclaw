@@ -320,7 +320,7 @@ URL content
             
             # Truncate overly long extracted content.
             if len(result.content) > self.config.max_content_length:
-                result.content = result.content[:self.config.max_content_length] + "\n...[内容已截断]"
+                result.content = result.content[:self.config.max_content_length] + "\n...[Content truncated]"
             
         except ImportError:
             # Fall back to a simple extractor when BeautifulSoup is unavailable.
@@ -470,5 +470,5 @@ convertlinkcontentinject into the messagein
             return text
         
         # inject into the message
-        link_section = "\n\n---\n**链接内容：**\n\n" + "\n\n".join(summaries)
+        link_section = "\n\n---\n**Link Content:**\n\n" + "\n\n".join(summaries)
         return text + link_section

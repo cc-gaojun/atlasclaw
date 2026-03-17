@@ -126,7 +126,7 @@ AtlasClaw uses `atlasclaw.json` for configuration. Create a configuration file i
 
 ```json
 {
-  "providers_root": "../providers",
+  "providers_root": "../atlasclaw-providers/providers",
   "model": {
     "primary": "kimi/kimi-k2.5",
     "temperature": 0.7,
@@ -143,7 +143,7 @@ AtlasClaw uses `atlasclaw.json` for configuration. Create a configuration file i
 
 Configuration options:
 
-- `providers_root` - Root directory for external provider templates and skills, resolved relative to `atlasclaw.json` (default: `../providers`)
+- `providers_root` - Root directory for external provider templates and skills, resolved relative to `atlasclaw.json`
 - Provider skills discovered under `providers_root` are registered as `provider:skill` to avoid name collisions
 - `model.primary` - Primary model in format `provider/model-name`
 - `model.providers` - Provider configurations with `base_url`, `api_key`, and `api_type`

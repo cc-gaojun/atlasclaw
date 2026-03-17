@@ -162,14 +162,13 @@ AtlasClaw-Core/
 │   ├── session/          # Session management
 │   ├── skills/           # Skill loading and registry
 │   └── tools/            # Built-in tools
-├── providers/             # External provider repository (configured via providers_root, default: ../providers)
-├── tests/                # Test suite
-│   ├── atlasclaw/          # Python tests
-│   └── frontend/         # JavaScript tests
-├── app/frontend/         # Frontend application
-├── docs/                 # Documentation
-└── openspec/             # Specification-driven development
-    └── AGENTS.md         # OpenSpec workflow guide
+├── tests/                 # Test suite
+│   ├── atlasclaw/         # Python tests
+│   └── frontend/          # JavaScript tests
+├── app/frontend/          # Frontend application
+├── docs/                  # Documentation
+└── openspec/              # Specification-driven development
+    └── AGENTS.md          # OpenSpec workflow guide
 ```
 
 ## Configuration
@@ -177,7 +176,10 @@ AtlasClaw-Core/
 - **Backend config:** `atlasclaw.json` (in project root)
 - **Test config:** `tests/atlasclaw.test.json`
 - **Environment variables:** Use `${VAR_NAME}` format in config
-- **Providers root:** `providers_root` in config (default: `../providers`, resolved relative to atlasclaw.json)
+- **External roots** (resolved relative to atlasclaw.json):
+  - `providers_root`: External provider repository (default: `../atlasclaw-providers/providers`)
+  - `skills_root`: External standalone skills (default: `../atlasclaw-providers/skills`)
+  - `channels_root`: External system-level channel configs (default: `../atlasclaw-providers/channels`)
 
 ## Architecture Patterns
 

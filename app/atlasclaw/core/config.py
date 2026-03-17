@@ -84,75 +84,102 @@ initializeConfiguration manager
     
     def load(self) -> AtlasClawConfig:
         """
-        加载配置
+        Load configuration.
         
-        优先级: 默认值 <- 全局配置 <- 工作区配置 <- 用户区配置 <- 环境变量 <- 运行时覆盖
+        Priority: defaults <- global config <- workspace config <- env vars <- runtime overrides
         
         Returns:
-            配置对象
+            Configuration object
         """
-        # 1. 从默认值开始
+        # 1. Start from defaults
         config_dict: dict[str, Any] = {}
         
-        # 2. 加载全局配置
+        # 2. Load global config
         global_config = self._load_from_file()
         if global_config:
             config_dict = self._deep_merge(config_dict, global_config)
         
-        # 3. 加载工作区配置（最高优先级文件配置）
+        # 3. Load workspace config (highest priority file config)
         workspace_config = self._load_workspace_config()
         if workspace_config:
             config_dict = self._deep_merge(config_dict, workspace_config)
         
-        # 4. 从环境变量加载
+        # 4. Load from environment variables
         env_config = self._load_from_env()
         if env_config:
             config_dict = self._deep_merge(config_dict, env_config)
         
-        # 5. 应用运行时覆盖
+        # 5. Apply runtime overrides
         if self._runtime_overrides:
             config_dict = self._deep_merge(config_dict, self._runtime_overrides)
         
-        # 6. 创建配置对象
+        # 6. Create configuration object
         try:
             self._config = AtlasClawConfig(**config_dict)
         except ValidationError as e:
-            # 配置验证失败，使用默认值
-            print(f"[ConfigManager] 配置验证失败，使用默认值: {e}")
+            # Config validation failed, use defaults
+            print(f"[ConfigManager] Config validation failed, using defaults: {e}")
             self._config = AtlasClawConfig()
         
         self._loaded = True
         return self._config
     
     def _load_workspace_config(self) -> Optional[dict]:
-        """加载工作区配置"""
-        # 首先尝试从已加载的配置中获取工作区路径
+        """Load workspace configuration."""
+        # First try to get workspace path from loaded config
         workspace_path = "."
         if self._config_path:
             workspace_path = str(Path(self._config_path).parent)
         
-        # 尝试加载工作区 atlasclaw.json
+        # Try to load workspace atlasclaw.json
         workspace_config_path = Path(workspace_path) / "atlasclaw.json"
         if workspace_config_path.exists():
             try:
                 with open(workspace_config_path, "r", encoding="utf-8") as f:
                     return json.load(f)
             except Exception as e:
-                print(f"[ConfigManager] 读取工作区配置失败 {workspace_config_path}: {e}")
+                print(f"[ConfigManager] Failed to read workspace config {workspace_config_path}: {e}")
         
         return None
     
     def load_user_config(self, user_id: str) -> dict:
-        """加载用户区配置"""
-        workspace_path = Path(self.config.workspace.path)
-        user_config_path = workspace_path / "users" / user_id / "atlasclaw.json"
+        """Load user-specific configuration.
         
+        Loads user config from users/<user_id>/user_setting.json.
+        Backward compatible: if user_setting.json doesn't exist, try atlasclaw.json.
+        
+        Args:
+            user_id: User identifier
+            
+        Returns:
+            User config dict with channels, providers, preferences fields
+        """
+        workspace_path = Path(self.config.workspace.path)
+        user_dir = workspace_path / "users" / user_id
+        
+        # First try to load user_setting.json (new format)
+        user_config_path = user_dir / "user_setting.json"
         if user_config_path.exists():
             try:
                 with open(user_config_path, "r", encoding="utf-8") as f:
                     return json.load(f)
             except Exception as e:
-                print(f"[ConfigManager] 读取用户配置失败 {user_config_path}: {e}")
+                print(f"[ConfigManager] Failed to read user config {user_config_path}: {e}")
+        
+        # Backward compatible: try loading old atlasclaw.json
+        legacy_config_path = user_dir / "atlasclaw.json"
+        if legacy_config_path.exists():
+            try:
+                with open(legacy_config_path, "r", encoding="utf-8") as f:
+                    legacy_config = json.load(f)
+                    # Convert to new format
+                    return {
+                        "channels": legacy_config.get("channels", {}),
+                        "providers": legacy_config.get("providers", {}),
+                        "preferences": legacy_config.get("preferences", {}),
+                    }
+            except Exception as e:
+                print(f"[ConfigManager] Failed to read legacy user config {legacy_config_path}: {e}")
         
         return {}
     
@@ -222,10 +249,10 @@ get configuration
                                 import yaml
                                 return yaml.safe_load(f)
                             except ImportError:
-                                print(f"[ConfigManager] YAML 支持需要安装 PyYAML")
+                                print(f"[ConfigManager] YAML support requires PyYAML installation")
                                 continue
                 except Exception as e:
-                    print(f"[ConfigManager] 读取配置文件失败 {path}: {e}")
+                    print(f"[ConfigManager] Failed to read config file {path}: {e}")
                     continue
         return None
 

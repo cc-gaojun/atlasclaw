@@ -283,7 +283,7 @@ class AgentRunner:
                                 steer_messages = self.queue.get_steer_messages(session_key)
                                 if steer_messages:
                                     combined = "\n".join(steer_messages)
-                                    yield StreamEvent.assistant_delta(f"\n[用户补充]: {combined}\n")
+                                    yield StreamEvent.assistant_delta(f"\n[User supplement]: {combined}\n")
 
                     # Persist the final normalized transcript.
                     final_messages = self._normalize_messages(agent_run.all_messages())
@@ -574,7 +574,7 @@ class AgentRunner:
             )
             return result.output if hasattr(result, "output") else str(result)
         except Exception as e:
-            return f"[错误: {str(e)}]"
+            return f"[Error: {str(e)}]"
 
 
 class MockAgentRunner:
@@ -586,7 +586,7 @@ class MockAgentRunner:
         tool_calls: Optional[list[dict]] = None,
     ):
         """Initialize the mock runner with scripted outputs."""
-        self.responses = responses or ["这是一个 Mock 响应。"]
+        self.responses = responses or ["This is a mock response."]
         self.tool_calls = tool_calls or []
         self._response_index = 0
         self._tool_index = 0

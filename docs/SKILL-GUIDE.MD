@@ -343,10 +343,11 @@ Skills support hot reloading in development mode:
 
 AtlasClaw searches for Skills in the following order:
 
-1. **Workspace Skills** - `{workspace}/skills/`
-2. **User Skills** - `~/.atlasclaw/skills/`
-3. **Built-in Skills** - `app/atlasclaw/skills/built_in/`
-4. **Provider Skills** - `app/atlasclaw/providers/*/skills/`
+1. **Workspace Skills** - `{workspace}/skills/` (for development)
+2. **Skills Root** - `{skills_root}/` (third-party skills, configured via skills_root)
+3. **User Skills** - `~/.atlasclaw/skills/`
+4. **Provider Skills** - `{providers_root}/*/skills/` (configured via providers_root)
+5. **Built-in Skills** - `app/atlasclaw/providers/*/skills/`
 
 #### 2. Skill Detection
 
@@ -827,7 +828,8 @@ Additional information, limitations, or considerations.
 
 | Location | Path | Priority |
 |----------|------|----------|
-| Workspace | `{workspace}/skills/` | Highest |
-| User | `~/.atlasclaw/skills/` | High |
-| Built-in | `app/atlasclaw/skills/built_in/` | Medium |
-| Provider | `app/atlasclaw/providers/*/skills/` | Low |
+| Workspace | `{workspace}/skills/` | Highest (dev) |
+| Skills Root | `{skills_root}/` | High |
+| User | `~/.atlasclaw/skills/` | Medium |
+| Provider | `{providers_root}/*/skills/` | Low |
+| Built-in | `app/atlasclaw/providers/*/skills/` | Lowest |

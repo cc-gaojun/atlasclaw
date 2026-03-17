@@ -16,7 +16,11 @@ class TestWorkspaceInitializer:
     """Test WorkspaceInitializer functionality."""
 
     def test_initialize_creates_directory_structure(self, tmp_path):
-        """Test: Creates workspace directory structure"""
+        """Test: Creates workspace directory structure
+        
+        Note: providers, skills, channels are now external directories
+        configured via providers_root, skills_root, channels_root.
+        """
         workspace = tmp_path / ".atlasclaw"
         initializer = WorkspaceInitializer(str(workspace))
         result = initializer.initialize()
@@ -24,9 +28,7 @@ class TestWorkspaceInitializer:
         assert result is True
         assert workspace.exists()
         assert (workspace / "agents").exists()
-        assert (workspace / "providers").exists()
-        assert (workspace / "skills").exists()
-        assert (workspace / "channels").exists()
+        # providers, skills, channels are now external (not in workspace)
         assert (workspace / "users").exists()
 
     def test_initialize_creates_default_main_agent(self, tmp_path):
@@ -81,38 +83,43 @@ class TestWorkspaceInitializer:
         content = soul_md.read_text(encoding="utf-8")
         
         assert "agent_id: \"main\"" in content
-        assert "系统提示词" in content
-        assert "能力范围" in content
+        assert "System Prompt" in content
+        assert "Capabilities" in content
 
 
 class TestUserWorkspaceInitializer:
     """Test UserWorkspaceInitializer functionality."""
 
     def test_initialize_creates_user_directory_structure(self, tmp_path):
-        """场景：首次创建用户目录结构（user_id="gang.wu"）"""
+        """场景：首次创建用户目录结构（user_id="gang.wu"）
+        
+        Note: channels/ is no longer created; user-level channel configs
+        are stored in user_setting.json instead.
+        """
         initializer = UserWorkspaceInitializer(str(tmp_path), "gang.wu")
         result = initializer.initialize()
         
         assert result is True
         user_dir = tmp_path / "users" / "gang.wu"
         assert user_dir.exists()
-        assert (user_dir / "channels").exists()
+        # channels/ is no longer created; config is in user_setting.json
         assert (user_dir / "sessions").exists()
         assert (user_dir / "memory").exists()
 
     def test_initialize_creates_default_user_config(self, tmp_path):
-        """场景：创建默认用户级 atlasclaw.json"""
+        """场景：创建默认用户级 user_setting.json"""
         initializer = UserWorkspaceInitializer(str(tmp_path), "test_user")
         initializer.initialize()
         
-        config_path = tmp_path / "users" / "test_user" / "atlasclaw.json"
+        config_path = tmp_path / "users" / "test_user" / "user_setting.json"
         assert config_path.exists()
         
         with open(config_path, "r", encoding="utf-8") as f:
             config = json.load(f)
         
-        assert "providers" in config
-        assert "skills" in config
+        assert "channels" in config
+        assert "preferences" in config
+        # Note: providers is NOT in user config (system-level only)
 
     def test_initialize_idempotent(self, tmp_path):
         """场景：用户目录已存在时跳过创建"""

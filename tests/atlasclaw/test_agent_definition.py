@@ -261,11 +261,11 @@ class TestAgentConfig:
     """Test AgentConfig dataclass."""
 
     def test_agent_config_defaults(self):
-        """场景：验证 AgentConfig 默认值"""
+        """Test: Verify AgentConfig default values"""
         config = AgentConfig()
         
         assert config.agent_id == "main"
-        assert config.name == "助手"
+        assert config.name == "Assistant"
         assert config.version == "1.0"
         assert config.max_context_rounds == 20
         assert config.capabilities == []

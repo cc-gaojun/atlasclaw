@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import logging
+import copy
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -12,12 +13,30 @@ from .models import ChannelConnection
 
 logger = logging.getLogger(__name__)
 
+# Default user setting structure
+DEFAULT_USER_SETTING = {
+    "channels": {},
+    "preferences": {}
+}
+
 
 class ChannelStore:
     """Store for user channel connection configurations.
     
     Stores channel configurations per-user in:
-    <workspace>/users/<user_id>/channels/<channel_type>.json
+    <workspace>/users/<user_id>/user_setting.json
+    
+    The channels are stored under the "channels" key with structure:
+    {
+        "channels": {
+            "<channel_type>": {
+                "connections": [...]
+            }
+        },
+        "preferences": {...}
+    }
+    
+    Note: providers are system-level configuration, not user-level.
     """
     
     def __init__(self, workspace_path: Path):
@@ -27,38 +46,72 @@ class ChannelStore:
             workspace_path: Path to workspace directory
         """
         self.workspace_path = Path(workspace_path)
-        self.channels_dir = self.workspace_path / "users"
+        self.users_dir = self.workspace_path / "users"
     
-    def _get_user_channels_dir(self, user_id: str) -> Path:
-        """Get user's channels directory.
+    def _get_user_setting_path(self, user_id: str) -> Path:
+        """Get user's setting file path.
         
         Args:
             user_id: User identifier
             
         Returns:
-            Path to user's channels directory
+            Path to user_setting.json
         """
-        return self.channels_dir / user_id / "channels"
+        return self.users_dir / user_id / "user_setting.json"
     
-    def _get_config_path(self, user_id: str, channel_type: str) -> Path:
-        """Get configuration file path.
+    def _load_user_setting(self, user_id: str) -> Dict[str, Any]:
+        """Load user setting from file.
         
         Args:
             user_id: User identifier
-            channel_type: Channel type
             
         Returns:
-            Path to configuration file
+            User setting dictionary
         """
-        return self._get_user_channels_dir(user_id) / f"{channel_type}.json"
+        setting_path = self._get_user_setting_path(user_id)
+        
+        if not setting_path.exists():
+            # Use deepcopy to avoid modifying the original DEFAULT_USER_SETTING
+            return copy.deepcopy(DEFAULT_USER_SETTING)
+        
+        try:
+            with open(setting_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            
+            # Ensure all required keys exist
+            if "channels" not in data:
+                data["channels"] = {}
+            if "preferences" not in data:
+                data["preferences"] = {}
+            
+            return data
+            
+        except Exception as e:
+            logger.error(f"Failed to load user setting for {user_id}: {e}")
+            return copy.deepcopy(DEFAULT_USER_SETTING)
     
-    def _ensure_dir(self, path: Path) -> None:
-        """Ensure directory exists.
+    def _save_user_setting(self, user_id: str, setting: Dict[str, Any]) -> bool:
+        """Save user setting to file.
         
         Args:
-            path: Directory path
+            user_id: User identifier
+            setting: User setting dictionary
+            
+        Returns:
+            True if saved successfully
         """
-        path.mkdir(parents=True, exist_ok=True)
+        try:
+            setting_path = self._get_user_setting_path(user_id)
+            setting_path.parent.mkdir(parents=True, exist_ok=True)
+            
+            with open(setting_path, "w", encoding="utf-8") as f:
+                json.dump(setting, f, indent=2, ensure_ascii=False)
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"Failed to save user setting for {user_id}: {e}")
+            return False
     
     def get_connections(
         self,
@@ -74,34 +127,23 @@ class ChannelStore:
         Returns:
             List of channel connections
         """
-        config_path = self._get_config_path(user_id, channel_type)
+        setting = self._load_user_setting(user_id)
+        channel_data = setting.get("channels", {}).get(channel_type, {})
+        connections_data = channel_data.get("connections", [])
         
-        if not config_path.exists():
-            return []
+        connections = []
+        for conn_data in connections_data:
+            connection = ChannelConnection(
+                id=conn_data.get("id", ""),
+                name=conn_data.get("name", ""),
+                channel_type=channel_type,
+                config=conn_data.get("config", {}),
+                enabled=conn_data.get("enabled", True),
+                is_default=conn_data.get("is_default", False),
+            )
+            connections.append(connection)
         
-        try:
-            with open(config_path, "r", encoding="utf-8") as f:
-                data = json.load(f)
-            
-            connections_data = data.get("connections", [])
-            connections = []
-            
-            for conn_data in connections_data:
-                connection = ChannelConnection(
-                    id=conn_data.get("id", ""),
-                    name=conn_data.get("name", ""),
-                    channel_type=channel_type,
-                    config=conn_data.get("config", {}),
-                    enabled=conn_data.get("enabled", True),
-                    is_default=conn_data.get("is_default", False),
-                )
-                connections.append(connection)
-            
-            return connections
-            
-        except Exception as e:
-            logger.error(f"Failed to load connections for {user_id}/{channel_type}: {e}")
-            return []
+        return connections
     
     def get_connection(
         self,
@@ -133,7 +175,7 @@ class ChannelStore:
         channel_type: str,
         connection: ChannelConnection
     ) -> bool:
-        """Save a connection.
+        """Save a connection to user_setting.json.
         
         Args:
             user_id: User identifier
@@ -144,42 +186,44 @@ class ChannelStore:
             True if saved successfully
         """
         try:
-            config_path = self._get_config_path(user_id, channel_type)
-            self._ensure_dir(config_path.parent)
+            setting = self._load_user_setting(user_id)
             
-            # Load existing connections
-            connections = self.get_connections(user_id, channel_type)
+            # Ensure channels structure exists
+            if "channels" not in setting:
+                setting["channels"] = {}
+            if channel_type not in setting["channels"]:
+                setting["channels"][channel_type] = {"connections": []}
+            
+            # Get current connections
+            connections = setting["channels"][channel_type].get("connections", [])
             
             # Update or add connection
             found = False
-            for i, conn in enumerate(connections):
-                if conn.id == connection.id:
-                    connections[i] = connection
+            for i, conn_data in enumerate(connections):
+                if conn_data.get("id") == connection.id:
+                    connections[i] = {
+                        "id": connection.id,
+                        "name": connection.name,
+                        "config": connection.config,
+                        "enabled": connection.enabled,
+                        "is_default": connection.is_default,
+                    }
                     found = True
                     break
             
             if not found:
-                connections.append(connection)
+                connections.append({
+                    "id": connection.id,
+                    "name": connection.name,
+                    "config": connection.config,
+                    "enabled": connection.enabled,
+                    "is_default": connection.is_default,
+                })
             
-            # Save to file
-            data = {
-                "channel_type": channel_type,
-                "connections": [
-                    {
-                        "id": conn.id,
-                        "name": conn.name,
-                        "config": conn.config,
-                        "enabled": conn.enabled,
-                        "is_default": conn.is_default,
-                    }
-                    for conn in connections
-                ]
-            }
+            # Update setting
+            setting["channels"][channel_type]["connections"] = connections
             
-            with open(config_path, "w", encoding="utf-8") as f:
-                json.dump(data, f, indent=2, ensure_ascii=False)
-            
-            return True
+            return self._save_user_setting(user_id, setting)
             
         except Exception as e:
             logger.error(f"Failed to save connection: {e}")
@@ -191,7 +235,7 @@ class ChannelStore:
         channel_type: str,
         connection_id: str
     ) -> bool:
-        """Delete a connection.
+        """Delete a connection from user_setting.json.
         
         Args:
             user_id: User identifier
@@ -202,36 +246,24 @@ class ChannelStore:
             True if deleted successfully
         """
         try:
-            config_path = self._get_config_path(user_id, channel_type)
+            setting = self._load_user_setting(user_id)
             
-            if not config_path.exists():
+            if channel_type not in setting.get("channels", {}):
                 return False
             
-            # Load existing connections
-            connections = self.get_connections(user_id, channel_type)
+            connections = setting["channels"][channel_type].get("connections", [])
             
             # Remove connection
-            connections = [c for c in connections if c.id != connection_id]
+            connections = [c for c in connections if c.get("id") != connection_id]
             
-            # Save to file
-            data = {
-                "channel_type": channel_type,
-                "connections": [
-                    {
-                        "id": conn.id,
-                        "name": conn.name,
-                        "config": conn.config,
-                        "enabled": conn.enabled,
-                        "is_default": conn.is_default,
-                    }
-                    for conn in connections
-                ]
-            }
+            # Update setting
+            setting["channels"][channel_type]["connections"] = connections
             
-            with open(config_path, "w", encoding="utf-8") as f:
-                json.dump(data, f, indent=2, ensure_ascii=False)
+            # Remove channel type if no connections left
+            if not connections:
+                del setting["channels"][channel_type]
             
-            return True
+            return self._save_user_setting(user_id, setting)
             
         except Exception as e:
             logger.error(f"Failed to delete connection: {e}")

@@ -181,7 +181,7 @@ triggerhook
                     result = modified
             except Exception as e:
                 # :in
-                print(f"[HookSystem] 钩子 '{hook.name}' 执行失败: {e}")
+                print(f"[HookSystem] Hook '{hook.name}' execution failed: {e}")
         
         # parallel execution(observe-only)
         if parallel:
@@ -201,7 +201,7 @@ triggerhook
         try:
             await hook.handler(context)
         except Exception as e:
-            print(f"[HookSystem] 并行钩子 '{hook.name}' 执行失败: {e}")
+            print(f"[HookSystem] Parallel hook '{hook.name}' execution failed: {e}")
     
     def list_hooks(self, phase: Optional[HookPhase] = None) -> list[dict]:
         """

@@ -113,28 +113,28 @@ class AgentFactory:
         return allowed
 
     def _build_system_prompt(self, config: AgentConfig) -> str:
-        parts = [f"你是 {config.id} 智能助手。"]
+        parts = [f"You are {config.id} intelligent assistant."]
         if config.metadata.get("role"):
-            parts.append(f"角色：{config.metadata['role']}")
+            parts.append(f"Role: {config.metadata['role']}")
         if config.metadata.get("goal"):
-            parts.append(f"目标：{config.metadata['goal']}")
+            parts.append(f"Goal: {config.metadata['goal']}")
         return "\n".join(parts)
 
 
 class IntentRecognizer:
     """Recognize a high-level request intent from user input."""
 
-    INTENT_PROMPT = """分析用户输入，识别意图类型。
+    INTENT_PROMPT = """Analyze the user input and identify the intent type.
 
-可选意图：
-- resource_query: 查询云资源（虚拟机、存储、网络等）
-- ticket_submit: 提交工单或服务请求
-- general_chat: 一般对话或问答
+Available intents:
+- resource_query: Query cloud resources (VMs, storage, networks, etc.)
+- ticket_submit: Submit tickets or service requests
+- general_chat: General conversation or Q&A
 
-用户输入：{user_input}
+User input: {user_input}
 
-返回 JSON 格式：
-{{"intent": "意图类型", "confidence": 0.0-1.0, "entities": {{}}}}
+Return JSON format:
+{{"intent": "intent_type", "confidence": 0.0-1.0, "entities": {{}}}}
 """
 
     def __init__(self, llm_caller: Optional[Callable[[str], str]] = None):
@@ -158,7 +158,7 @@ class IntentRecognizer:
     def _fast_match(self, user_input: str) -> IntentResult:
         text = user_input.lower()
 
-        resource_keywords = ["查询", "查看", "虚拟机", "vm", "资源", "列表", "状态"]
+        resource_keywords = ["query", "view", "vm", "virtual machine", "resource", "list", "status", "check"]
         if any(kw in text for kw in resource_keywords):
             return IntentResult(
                 intent=IntentType.RESOURCE_QUERY,
@@ -166,7 +166,7 @@ class IntentRecognizer:
                 agent_id="resource_agent",
             )
 
-        ticket_keywords = ["申请", "工单", "提交", "创建", "扩容", "新建"]
+        ticket_keywords = ["request", "ticket", "submit", "create", "expand", "new"]
         if any(kw in text for kw in ticket_keywords):
             return IntentResult(
                 intent=IntentType.TICKET_SUBMIT,

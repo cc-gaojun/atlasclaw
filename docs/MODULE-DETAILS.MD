@@ -133,7 +133,7 @@ Pydantic models defining all configuration sections.
 | `AgentDefaultsConfig` | `timeout_seconds=600`, `max_concurrent=4`, `max_tool_calls=50`, `prompt_mode=FULL`, `bootstrap_max_chars=20000`, `block_streaming_default=False` |
 | `MessagesConfig` | `queue`, `response_prefix=""`, `reply_to_mode="auto"`, `inbound_debounce_ms=1000`, `dedup_ttl_seconds=60` |
 | `MemoryConfig` | `enabled=True`, `vector_weight=0.7`, `fulltext_weight=0.3`, `time_decay_half_life_days=30.0`, `max_results=6` |
-| `WorkspaceConfig` | `path="./.atlasclaw"`, `per_user_isolation=True` |
+| `WorkspaceConfig` | `path="./.atlasclaw"` |
 
 ### 1.4 Workspace Initialization (`core/workspace.py`)
 
@@ -149,9 +149,6 @@ Creates the global workspace directory structure on first run:
 │       ├── IDENTITY.md
 │       ├── USER.md
 │       └── MEMORY.md
-├── providers/
-├── skills/
-├── channels/
 └── users/
 ```
 
@@ -166,8 +163,7 @@ Creates per-user directory structure:
 
 ```
 users/<user_id>/
-├── atlasclaw.json
-├── channels/
+├── user_setting.json      # User-specific config (channels, preferences)
 ├── sessions/
 └── memory/
 ```

@@ -120,6 +120,8 @@ async def lifespan(app: FastAPI):
     config_path = get_config_path()
     config_root = config_path.parent if config_path is not None else Path.cwd()
     providers_root = (config_root / config.providers_root).resolve()
+    skills_root = (config_root / config.skills_root).resolve()
+    channels_root = (config_root / config.channels_root).resolve()
     
     # Get workspace path from config
     workspace_path = config.workspace.path
@@ -151,8 +153,7 @@ async def lifespan(app: FastAPI):
     print(f"[AtlasClaw] Channel manager initialized")
     
     # Scan providers for channel and auth extensions
-    providers_dir = Path(workspace_path) / ".atlasclaw" / "providers"
-    scan_results = ProviderScanner.scan_providers(providers_dir)
+    scan_results = ProviderScanner.scan_providers(providers_root)
     print(f"[AtlasClaw] Provider scan complete: {len(scan_results['channels'])} channels, {len(scan_results['auth'])} auth providers")
     
     # Load agent definitions
@@ -187,39 +188,40 @@ async def lifespan(app: FastAPI):
     registered_tools = register_builtin_tools(_skill_registry, profile=ToolProfile.FULL)
     print(f"[AtlasClaw] Registered {len(registered_tools)} built-in tools")
     
-    # Load skills from multiple sources (priority: workspace > global > built-in)
-
-    # 1. Built-in skills from app providers
-    providers_dir = Path(__file__).parent / "providers"
-    if providers_dir.exists():
-        for provider_path in providers_dir.iterdir():
+    # Load skills from multiple sources (priority order: workspace > skills_root > providers_root > built-in)
+    
+    # 1. Built-in skills from app providers (lowest priority)
+    built_in_providers_dir = Path(__file__).parent / "providers"
+    if built_in_providers_dir.exists():
+        for provider_path in built_in_providers_dir.iterdir():
             if provider_path.is_dir():
                 provider_skills = provider_path / "skills"
                 if provider_skills.exists():
                     _skill_registry.load_from_directory(str(provider_skills), location="built-in")
-
-
-
-    # 2. Workspace provider skills (providers inside workspace)
-    workspace_providers_dir = Path(workspace_path) / "providers"
-    if workspace_providers_dir.exists():
-        for provider_path in workspace_providers_dir.iterdir():
+    
+    # 2. Provider skills from providers_root
+    if providers_root.exists():
+        for provider_path in providers_root.iterdir():
             if provider_path.is_dir():
                 provider_skills = provider_path / "skills"
                 if provider_skills.exists():
                     provider_name = provider_path.name
                     _skill_registry.load_from_directory(
                         str(provider_skills), 
-                        location="workspace-provider",
+                        location="provider",
                         provider=provider_name
                     )
-
-    # 3. Global skills (user home directory)
+    
+    # 3. Standalone skills from skills_root (third-party skills)
+    if skills_root.exists():
+        _skill_registry.load_from_directory(str(skills_root), location="skills-root")
+    
+    # 4. Global skills (user home directory)
     global_skills = Path.home() / ".atlasclaw" / "skills"
     if global_skills.exists():
         _skill_registry.load_from_directory(str(global_skills), location="global")
     
-    # 4. Workspace skills (highest priority)
+    # 5. Workspace skills (highest priority, for development)
     workspace_skills = Path(workspace_path) / "skills"
     if workspace_skills.exists():
         _skill_registry.load_from_directory(str(workspace_skills), location="workspace")
@@ -478,7 +480,7 @@ def create_app() -> FastAPI:
             app.state.config.auth = _auth
     except Exception as _e:
         import logging as _logging
-        _logging.getLogger(__name__
+        _logging.getLogger(__name__).warning("Failed to setup auth middleware: %s", _e)
 
     return app
 

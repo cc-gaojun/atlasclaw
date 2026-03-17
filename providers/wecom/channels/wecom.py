@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""WeCom (企业微信) channel handler."""
+"""WeCom channel handler."""
 
 from __future__ import annotations
 
@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 
 
 class WeComHandler(ChannelHandler):
-    """WeCom (企业微信) channel handler.
+    """WeCom channel handler.
     
     Supports:
     - Group robot webhook (outbound only)

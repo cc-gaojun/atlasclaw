@@ -1,5 +1,10 @@
 {
-  "providers_root": "../providers",
+  "workspace": {
+    "path": "./.atlasclaw"
+  },
+  "providers_root": "../atlasclaw-providers/providers",
+  "skills_root": "../atlasclaw-providers/skills",
+  "channels_root": "../atlasclaw-providers/channels",
   "model": {
     "primary": "deepseek/deepseek-chat",
     "fallbacks": [],

@@ -52,7 +52,7 @@ class PromptBuilderConfig:
     time_format: str = "auto"  # auto | 12 | 24
     sandbox: SandboxConfig = field(default_factory=SandboxConfig)
     agent_name: str = "AtlasClaw"
-    agent_description: str = "企业级 AI 助理"
+    agent_description: str = "Enterprise AI Assistant"
     # Marker file used to detect a newly initialized workspace
     new_workspace_marker: str = ".atlasclaw_new_workspace"
     # Total character budget for the Markdown skill index section
@@ -124,7 +124,7 @@ class PromptBuilder:
             The assembled system prompt text.
         """
         if self.config.mode == PromptMode.NONE:
-            return f"你是 {self.config.agent_name}，一个{self.config.agent_description}。"
+            return f"You are {self.config.agent_name}, {self.config.agent_description}."
         
         parts = []
         
@@ -212,32 +212,32 @@ class PromptBuilder:
     
     def _build_user_context(self, user_info: "UserInfo") -> str:
         """Build a user identity section for the current authenticated operator."""
-        lines = ["## 当前用户", ""]
+        lines = ["## Current User", ""]
         if user_info.display_name:
-            lines.append(f"用户名：{user_info.display_name}")
-        lines.append(f"用户 ID：{user_info.user_id}")
+            lines.append(f"Name: {user_info.display_name}")
+        lines.append(f"User ID: {user_info.user_id}")
         if user_info.tenant_id and user_info.tenant_id != "default":
-            lines.append(f"租户：{user_info.tenant_id}")
+            lines.append(f"Tenant: {user_info.tenant_id}")
         if user_info.roles:
-            lines.append(f"角色：{', '.join(user_info.roles)}")
+            lines.append(f"Roles: {', '.join(user_info.roles)}")
         return "\n".join(lines)
 
     def _build_identity(self) -> str:
-        """build"""
-        return f"""## 身份
+        """Build the identity section."""
+        return f"""## Identity
 
-你是 {self.config.agent_name}，一个{self.config.agent_description}。
+You are {self.config.agent_name}, {self.config.agent_description}.
 
-你的主要能力包括：
-- 处理复杂的多轮对话，保持上下文连贯性
-- 调用各种业务技能（云资源管理、ITSM、工单处理等）
-- 管理长期记忆，支持语义检索
-- 支持多步工作流和任务协作"""
+Your core capabilities include:
+- Handling complex multi-turn conversations with context continuity
+- Invoking various business skills (cloud resource management, ITSM, ticket processing, etc.)
+- Managing long-term memory with semantic retrieval
+- Supporting multi-step workflows and task collaboration"""
     
     def _build_tooling(self, tools: list[dict]) -> str:
         """Build the tool listing section."""
-        lines = ["## 工具", ""]
-        lines.append("你可以使用以下工具来完成任务：")
+        lines = ["## Tools", ""]
+        lines.append("You can use the following tools to complete tasks:")
         lines.append("")
         for tool in tools:
             name = tool.get("name", "unknown")
@@ -246,14 +246,14 @@ class PromptBuilder:
         return "\n".join(lines)
     
     def _build_safety(self) -> str:
-        """build"""
-        return """## 安全
+        """Build the safety section."""
+        return """## Safety
 
-请遵循以下安全准则：
-- 避免追求权力的行为或绕过监督
-- 不执行可能造成不可逆损害的操作
-- 敏感信息需脱敏处理
-- 遵守用户的数据隐私"""
+Please follow these safety guidelines:
+- Avoid power-seeking behaviors or bypassing oversight
+- Do not execute operations that may cause irreversible damage
+- Sensitive information must be desensitized
+- Respect user data privacy"""
     
     def _build_skills_listing(self, skills: list[dict]) -> str:
         """buildavailable Skills list(XML format)"""
@@ -469,27 +469,27 @@ class PromptBuilder:
         return accumulated
     
     def _build_self_update(self) -> str:
-        """build"""
-        return """## 自更新
+        """Build the self-update section."""
+        return """## Self-Update
 
-如需应用配置更改，请使用相应的配置命令。"""
+To apply configuration changes, use the appropriate configuration commands."""
     
     def _build_workspace_info(self) -> str:
-        """build workspace"""
+        """Build the workspace information section."""
         workspace = Path(self.config.workspace_path).expanduser()
-        return f"""## 工作区
+        return f"""## Workspace
 
-工作目录: `{workspace}`
+Working directory: `{workspace}`
 
-你可以在此目录下读取和写入文件。"""
+You can read and write files in this directory."""
     
     def _build_documentation(self) -> str:
-        """build documentation path"""
-        return """## 文档
+        """Build the documentation section."""
+        return """## Documentation
 
-本地文档路径: `docs/`
+Local documentation path: `docs/`
 
-如需了解 AtlasClaw 的行为、命令、配置或架构，请首先查阅本地文档。"""
+To understand AtlasClaw's behavior, commands, configuration, or architecture, please refer to the local documentation first."""
     
     def _build_bootstrap(self) -> str:
         """
@@ -502,7 +502,7 @@ inject Bootstrap
  
 """
         workspace = Path(self.config.workspace_path).expanduser()
-        sections = ["## 项目上下文", ""]
+        sections = ["## Project Context", ""]
         
         # workspace(through)
         marker_file = workspace / self.config.new_workspace_marker
@@ -521,12 +521,12 @@ inject Bootstrap
                     if len(content) > self.config.bootstrap_max_chars:
                         content = (
                             content[:self.config.bootstrap_max_chars]
-                            + f"\n...[截断于 {self.config.bootstrap_max_chars} 字符]"
+                            + f"\n...[Truncated at {self.config.bootstrap_max_chars} characters]"
                         )
                     sections.append(f"### {filename}\n\n{content}")
                     any_found = True
                 except Exception as e:
-                    sections.append(f"### {filename}\n\n[读取失败: {e}]")
+                    sections.append(f"### {filename}\n\n[Read failed: {e}]")
         
         # inject BOOTSTRAP.md workspace(run)
         if is_new_workspace and marker_file.exists():
@@ -565,29 +565,29 @@ convertworkspace workspace
         marker_file.touch(exist_ok=True)
     
     def _build_sandbox(self) -> str:
-        """build"""
-        return f"""## 沙箱
+        """Build the sandbox section."""
+        return f"""## Sandbox
 
-模式: {self.config.sandbox.mode}
-沙箱路径: {self.config.sandbox.workspace_root}
-提权执行: {"可用" if self.config.sandbox.elevated_exec else "不可用"}
+Mode: {self.config.sandbox.mode}
+Sandbox path: {self.config.sandbox.workspace_root}
+Elevated execution: {"Available" if self.config.sandbox.elevated_exec else "Unavailable"}
 
-在沙箱模式下，某些操作可能受到限制。"""
+In sandbox mode, some operations may be restricted."""
     
     def _build_datetime(self) -> str:
-        """build"""
+        """Build the datetime section."""
         now = datetime.now()
-        tz = self.config.user_timezone or "系统时区"
+        tz = self.config.user_timezone or "System timezone"
         
         if self.config.time_format == "12":
             time_str = now.strftime("%Y-%m-%d %I:%M:%S %p")
         else:
             time_str = now.strftime("%Y-%m-%d %H:%M:%S")
         
-        return f"""## 当前时间
+        return f"""## Current Time
 
-时区: {tz}
-当前时间: {time_str}"""
+Timezone: {tz}
+Current time: {time_str}"""
     
     def _build_reply_tags(self) -> str:
         """build reply"""
@@ -601,12 +601,12 @@ convertworkspace workspace
     
     def _build_runtime_info(self) -> str:
         """Build the runtime information section."""
-        return f"""## 运行时
+        return f"""## Runtime
 
-主机: {platform.node()}
-操作系统: {platform.system()} {platform.release()}
+Host: {platform.node()}
+OS: {platform.system()} {platform.release()}
 Python: {platform.python_version()}
-框架: AtlasClaw v0.1.0"""
+Framework: AtlasClaw v0.1.0"""
     
     def get_context_info(self, detail: bool = False) -> dict:
         """Return prompt context metrics used by the `/context` command."""
@@ -623,7 +623,7 @@ Python: {platform.python_version()}
             if filename == "BOOTSTRAP.md" and not is_new_workspace:
                 files_info.append({
                     "filename": filename,
-                    "status": "跳过（非新工作区）",
+                    "status": "Skipped (not a new workspace)",
                 })
                 continue
                 
@@ -651,12 +651,12 @@ Python: {platform.python_version()}
                 except Exception:
                     files_info.append({
                         "filename": filename,
-                        "error": "读取失败",
+                        "error": "Read failed",
                     })
             else:
                 files_info.append({
                     "filename": filename,
-                    "status": "缺失",
+                    "status": "Missing",
                 })
         
         result = {
@@ -688,18 +688,18 @@ get system prompt
         
         # estimate
         section_estimates = [
-            ("identity", "身份", len(self._build_identity())),
-            ("safety", "安全", len(self._build_safety())),
-            ("self_update", "自更新", len(self._build_self_update())),
-            ("workspace", "工作区", len(self._build_workspace_info())),
-            ("documentation", "文档", len(self._build_documentation())),
-            ("datetime", "时间", len(self._build_datetime())),
-            ("runtime", "运行时", len(self._build_runtime_info())),
+            ("identity", "Identity", len(self._build_identity())),
+            ("safety", "Safety", len(self._build_safety())),
+            ("self_update", "Self-Update", len(self._build_self_update())),
+            ("workspace", "Workspace", len(self._build_workspace_info())),
+            ("documentation", "Documentation", len(self._build_documentation())),
+            ("datetime", "DateTime", len(self._build_datetime())),
+            ("runtime", "Runtime", len(self._build_runtime_info())),
         ]
         
         if self.config.sandbox.enabled:
             section_estimates.append(
-                ("sandbox", "沙箱", len(self._build_sandbox()))
+                ("sandbox", "Sandbox", len(self._build_sandbox()))
             )
         
         for section_id, section_name, char_count in section_estimates:

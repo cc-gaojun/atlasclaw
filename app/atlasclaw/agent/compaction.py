@@ -160,7 +160,7 @@ class CompactionPipeline:
         # Insert the generated summary as a synthetic system message.
         result.append({
             "role": "system",
-            "content": f"[压缩摘要 - 较早的对话已被总结]\n{summary}",
+            "content": f"[Compression Summary - Earlier conversation has been summarized]\n{summary}",
         })
 
         # Preserve the recent conversation verbatim.
@@ -183,30 +183,26 @@ class CompactionPipeline:
                 preview = content[:100] + "..." if len(content) > 100 else content
                 summary_parts.append(f"- [{role}]: {preview}")
         
-        return "\n".join(summary_parts) if summary_parts else "（无内容）"
+        return "\n".join(summary_parts) if summary_parts else "(No content)"
     
     def prune_tool_results(
         self,
         messages: list[dict],
         mode: str = "soft",
     ) -> list[dict]:
+        """Prune tool results to save context space.
+        
+        Args:
+            messages: Message list
+            mode: Pruning mode (soft/hard)
+            
+        Returns:
+            Pruned message list
         """
-
-
-tool
- 
- Args:
- messages:message list
- mode:mode(soft/hard)
- 
- Returns:
- message list
- 
-"""
         result = []
         assistant_count = 0
         
-        # from count message
+        # Count assistant messages from the end
         for msg in reversed(messages):
             if msg.get("role") == "assistant":
                 assistant_count += 1
@@ -217,16 +213,16 @@ tool
             if msg.get("role") == "assistant":
                 current_assistant -= 1
             
-            # item message
+            # Keep recent messages
             if current_assistant < self.config.keep_last_assistants:
                 result.append(msg)
                 continue
             
-            # handletool
+            # Handle tool results
             if msg.get("role") == "tool":
                 content = msg.get("content", "")
                 
-                # contains content
+                # Check if content contains images
                 if isinstance(content, list):
                     has_image = any(
                         isinstance(p, dict) and p.get("type") == "image"
@@ -236,19 +232,19 @@ tool
                         result.append(msg)
                         continue
                 
-                # check
+                # Prune large tool results
                 if isinstance(content, str) and len(content) > self.config.hard_clear_threshold:
                     if mode == "hard":
-                        # hard clear:
+                        # Hard clear: remove content entirely
                         msg = msg.copy()
-                        msg["content"] = "[工具结果已清除以节省上下文空间]"
+                        msg["content"] = "[Tool result cleared to save context space]"
                     else:
-                        # soft trim:keep the head and tail
+                        # Soft trim: keep head and tail
                         msg = msg.copy()
                         head = content[:500]
                         tail = content[-200:]
                         original_size = len(content)
-                        msg["content"] = f"{head}\n...\n{tail}\n[原始大小: {original_size} 字符]"
+                        msg["content"] = f"{head}\n...\n{tail}\n[Original size: {original_size} characters]"
             
             result.append(msg)
         
@@ -259,20 +255,17 @@ tool
         session: Any,
         flush_callback: Optional[Callable[[], Awaitable[None]]] = None,
     ) -> None:
-        """
-
-execute
+        """Execute memory flush.
         
         Triggers a silent agent turn that reminds the model to write persistent memory.
         
         Args:
-            session:session metadata
-            flush_callback:count
-        
-"""
+            session: Session metadata
+            flush_callback: Optional flush callback
+        """
         if flush_callback:
             await flush_callback()
         
-        # 
+        # Mark session as flushed
         if hasattr(session, "memory_flushed_this_cycle"):
             session.memory_flushed_this_cycle = True

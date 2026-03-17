@@ -997,6 +997,16 @@ cd app/frontend && npm test
         └── SKILL.md  # Markdown-only skill
 ```
 
+**Configuration roots** (in `atlasclaw.json`):
+
+| Config Field | Default | Description |
+|-------------|---------|-------------|
+| `providers_root` | `../atlasclaw-providers/providers` | Enterprise integrations |
+| `skills_root` | `../atlasclaw-providers/skills` | Third-party standalone skills |
+| `channels_root` | `../atlasclaw-providers/channels` | System-level channel configs |
+
+All paths are resolved relative to the `atlasclaw.json` file location.
+
 **PROVIDER.md frontmatter**:
 
 ```yaml
@@ -1178,9 +1188,26 @@ Use `${VAR_NAME}` or `${VAR_NAME:default_value}` in config files:
 }
 ```
 
-### 10.4 Per-User Overrides
+### 10.4 Per-User Configuration
 
-Per-user configuration in `<workspace>/users/<user_id>/atlasclaw.json` is merged with the global config. Only include fields that differ from the default.
+Per-user configuration is stored in `<workspace>/users/<user_id>/user_setting.json`:
+
+```json
+{
+  "channels": {
+    "feishu": {
+      "connections": [...]
+    }
+  },
+  "preferences": {
+    "language": "zh-CN"
+  }
+}
+```
+
+**Backward compatibility**: The system also checks for legacy `atlasclaw.json` in user directories.
+
+**Note**: User-specific config is separate from the core `atlasclaw.json` (which is workspace-level). Only include fields that differ from the default. Providers are system-level configuration, not user-level.
 
 ***
 

@@ -211,7 +211,7 @@ class ChannelManager:
                     response_text += event.content or ""
                 elif event.type == "error":
                     logger.error(f"[ChannelManager] Agent error: {event.error}")
-                    response_text = f"处理出错: {event.error}"
+                    response_text = f"Processing error: {event.error}"
                     break
             
             logger.info(f"[ChannelManager] Processed {event_count} events, response length: {len(response_text)}")

@@ -95,7 +95,28 @@ Create a configuration file at:
 users/{user_id}/channels/{channel_type}.json
 ```
 
-Configuration structure:
+Or store user-level channel config in `users/{user_id}/user_setting.json`:
+```json
+{
+  "channels": {
+    "feishu": {
+      "connections": [
+        {
+          "id": "unique-connection-id",
+          "name": "Display Name",
+          "enabled": true,
+          "config": {
+            "app_id": "cli_xxx",
+            "app_secret": "xxx"
+          }
+        }
+      ]
+    }
+  }
+}
+```
+
+Configuration structure (standalone file):
 ```json
 {
   "channel_type": "{type}",

@@ -652,17 +652,28 @@ Providers can be deployed to multiple locations:
 
 **Use Case**: Essential system integrations maintained by the Core team.
 
-#### 2. Workspace Providers
+#### 2. External Providers (Recommended)
 
-**Location**: `{workspace}/providers/<provider-name>/`
+**Location**: `<providers_root>/<provider-name>/` (default: `../providers/`)
 
 **Characteristics**:
-- Project-specific integrations
-- Overrides built-in Providers
-- Custom business logic
-- Version controlled with project
+- External directory configured via `providers_root` in `atlasclaw.json`
+- Enterprise integrations maintained separately from user data
+- Version controlled independently
+- Default location: sibling directory to project root
 
-**Use Case**: Custom Provider for a specific project or organization.
+**Use Case**: Enterprise provider integrations (Jira, ServiceNow, etc.).
+
+#### 3. Workspace Providers (Development)
+
+**Location**: `<workspace>/providers/<provider-name>/` (optional)
+
+**Characteristics**:
+- Development-time overrides
+- Local testing and debugging
+- Highest priority if exists
+
+**Use Case**: Local development and testing of Providers.
 
 #### 3. User Providers
 
@@ -787,8 +798,9 @@ Add to `atlasclaw.json`:
 #### Step 5: Deploy Provider
 
 Copy Provider directory to target location:
+- External (recommended): `<providers_root>/` (configured in `atlasclaw.json`, default: `../providers/`)
 - Built-in: `app/atlasclaw/providers/`
-- Workspace: `{workspace}/providers/`
+- Workspace (dev): `<workspace>/providers/`
 - User: `~/.atlasclaw/providers/`
 
 #### Step 6: Verify Loading

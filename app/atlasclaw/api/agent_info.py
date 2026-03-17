@@ -40,7 +40,7 @@ async def get_agent_info() -> AgentInfoResponse:
         
         # Add name
         name = soul_data.get("name", identity_data.get("name", "AtlasClaw"))
-        welcome_parts.append(f"你好！我是 {name}。")
+        welcome_parts.append(f"Hello! I'm {name}.")
         
         # Add description
         description = soul_data.get("description", identity_data.get("description", ""))
@@ -50,7 +50,7 @@ async def get_agent_info() -> AgentInfoResponse:
         # Add core values if available
         core_values = soul_data.get("core_values", [])
         if core_values:
-            welcome_parts.append(f"\n我的核心价值：{', '.join(core_values)}")
+            welcome_parts.append(f"\nMy core values: {', '.join(core_values)}")
         
         welcome_message = "\n\n".join(welcome_parts)
         
