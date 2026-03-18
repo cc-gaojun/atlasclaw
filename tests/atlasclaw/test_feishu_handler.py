@@ -298,3 +298,124 @@ class TestFeishuHandlerMessageCallback:
         handler.set_message_callback(callback)
         
         assert handler._message_callback == callback
+
+
+class TestFeishuConnectionMode:
+    """Tests for Feishu connection_mode feature."""
+
+    def test_schema_has_connection_mode(self):
+        """Test schema includes connection_mode field."""
+        handler = FeishuHandler()
+        schema = handler.describe_schema()
+        
+        assert "connection_mode" in schema["properties"]
+        cm = schema["properties"]["connection_mode"]
+        assert cm["type"] == "string"
+        assert cm["enum"] == ["longconnection", "webhook"]
+        assert cm["default"] == "longconnection"
+        assert "enumLabels" in cm
+
+    def test_schema_has_required_by_mode(self):
+        """Test schema includes required_by_mode."""
+        handler = FeishuHandler()
+        schema = handler.describe_schema()
+        
+        assert "required_by_mode" in schema
+        rbm = schema["required_by_mode"]
+        assert "longconnection" in rbm
+        assert "webhook" in rbm
+        assert "app_id" in rbm["longconnection"]
+        assert "app_secret" in rbm["longconnection"]
+        assert "webhook_url" in rbm["webhook"]
+
+    def test_schema_fields_have_show_when(self):
+        """Test fields have showWhen conditions."""
+        handler = FeishuHandler()
+        schema = handler.describe_schema()
+        props = schema["properties"]
+        
+        # Long connection mode fields
+        assert props["app_id"]["showWhen"] == {"connection_mode": "longconnection"}
+        assert props["app_secret"]["showWhen"] == {"connection_mode": "longconnection"}
+        
+        # Webhook mode fields
+        assert props["webhook_url"]["showWhen"] == {"connection_mode": "webhook"}
+
+    @pytest.mark.asyncio
+    async def test_validate_config_longconnection_mode(self):
+        """Test validation for long connection mode."""
+        handler = FeishuHandler()
+        
+        # Valid long connection config
+        result = await handler.validate_config({
+            "connection_mode": "longconnection",
+            "app_id": "cli_test",
+            "app_secret": "test_secret"
+        })
+        assert result.valid is True
+        
+        # Invalid long connection config (missing app_secret)
+        result = await handler.validate_config({
+            "connection_mode": "longconnection",
+            "app_id": "cli_test"
+        })
+        assert result.valid is False
+
+    @pytest.mark.asyncio
+    async def test_validate_config_webhook_mode(self):
+        """Test validation for webhook mode."""
+        handler = FeishuHandler()
+        
+        # Valid webhook config
+        result = await handler.validate_config({
+            "connection_mode": "webhook",
+            "webhook_url": "https://open.feishu.cn/open-apis/bot/v2/hook/xxx"
+        })
+        assert result.valid is True
+        
+        # Invalid webhook config (missing webhook_url)
+        result = await handler.validate_config({
+            "connection_mode": "webhook"
+        })
+        assert result.valid is False
+
+    @pytest.mark.asyncio
+    async def test_send_via_webhook(self):
+        """Test sending message via webhook."""
+        handler = FeishuHandler()
+        handler.config = {
+            "connection_mode": "webhook",
+            "webhook_url": "https://open.feishu.cn/open-apis/bot/v2/hook/xxx"
+        }
+        
+        outbound = OutboundMessage(
+            chat_id="test_chat",
+            content="Hello via webhook",
+            content_type="text",
+        )
+        
+        with patch("app.atlasclaw.channels.handlers.feishu.aiohttp") as mock_aiohttp:
+            mock_response = MagicMock()
+            mock_response.status = 200
+            mock_response.json = AsyncMock(return_value={"code": 0})
+            
+            mock_post_cm = AsyncMock()
+            mock_post_cm.__aenter__.return_value = mock_response
+            mock_post_cm.__aexit__.return_value = None
+            
+            mock_session = MagicMock()
+            mock_session.post.return_value = mock_post_cm
+            
+            mock_session_cm = AsyncMock()
+            mock_session_cm.__aenter__.return_value = mock_session
+            mock_session_cm.__aexit__.return_value = None
+            
+            mock_aiohttp.ClientSession.return_value = mock_session_cm
+            
+            result = await handler.send_message(outbound)
+            
+            assert result.success is True
+            # Verify webhook URL was called
+            mock_session.post.assert_called_once()
+            call_args = mock_session.post.call_args
+            assert "webhook_url" in handler.config

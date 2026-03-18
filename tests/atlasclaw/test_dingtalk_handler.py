@@ -261,3 +261,84 @@ class TestDingTalkHandlerMessageCallback:
         call_arg = callback.call_args[0][0]
         assert isinstance(call_arg, InboundMessage)
         assert call_arg.content == "Hello"
+
+
+class TestDingTalkConnectionMode:
+    """Tests for DingTalk connection_mode feature."""
+
+    def test_schema_has_connection_mode(self):
+        """Test schema includes connection_mode field."""
+        handler = DingTalkHandler()
+        schema = handler.describe_schema()
+        
+        assert "connection_mode" in schema["properties"]
+        cm = schema["properties"]["connection_mode"]
+        assert cm["type"] == "string"
+        assert cm["enum"] == ["stream", "webhook"]
+        assert cm["default"] == "stream"
+        assert "enumLabels" in cm
+
+    def test_schema_has_required_by_mode(self):
+        """Test schema includes required_by_mode."""
+        handler = DingTalkHandler()
+        schema = handler.describe_schema()
+        
+        assert "required_by_mode" in schema
+        rbm = schema["required_by_mode"]
+        assert "stream" in rbm
+        assert "webhook" in rbm
+        assert "client_id" in rbm["stream"]
+        assert "client_secret" in rbm["stream"]
+        assert "webhook_url" in rbm["webhook"]
+
+    def test_schema_fields_have_show_when(self):
+        """Test fields have showWhen conditions."""
+        handler = DingTalkHandler()
+        schema = handler.describe_schema()
+        props = schema["properties"]
+        
+        # Stream mode fields
+        assert props["client_id"]["showWhen"] == {"connection_mode": "stream"}
+        assert props["client_secret"]["showWhen"] == {"connection_mode": "stream"}
+        
+        # Webhook mode fields
+        assert props["webhook_url"]["showWhen"] == {"connection_mode": "webhook"}
+        assert props["secret"]["showWhen"] == {"connection_mode": "webhook"}
+
+    @pytest.mark.asyncio
+    async def test_validate_config_stream_mode(self):
+        """Test validation for stream mode."""
+        handler = DingTalkHandler()
+        
+        # Valid stream config
+        result = await handler.validate_config({
+            "connection_mode": "stream",
+            "client_id": "test_id",
+            "client_secret": "test_secret"
+        })
+        assert result.valid is True
+        
+        # Invalid stream config (missing client_secret)
+        result = await handler.validate_config({
+            "connection_mode": "stream",
+            "client_id": "test_id"
+        })
+        assert result.valid is False
+
+    @pytest.mark.asyncio
+    async def test_validate_config_webhook_mode(self):
+        """Test validation for webhook mode."""
+        handler = DingTalkHandler()
+        
+        # Valid webhook config
+        result = await handler.validate_config({
+            "connection_mode": "webhook",
+            "webhook_url": "https://oapi.dingtalk.com/robot/send?access_token=xxx"
+        })
+        assert result.valid is True
+        
+        # Invalid webhook config (missing webhook_url)
+        result = await handler.validate_config({
+            "connection_mode": "webhook"
+        })
+        assert result.valid is False

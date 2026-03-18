@@ -366,6 +366,7 @@ function renderConfigForm(schema, values = {}) {
     
     const properties = schema.properties || {};
     const required = schema.required || [];
+    const requiredByMode = schema.required_by_mode || {};
     
     // Get localized placeholder for connection name
     const namePlaceholder = t('channel.connectionNamePlaceholder');
@@ -379,23 +380,65 @@ function renderConfigForm(schema, values = {}) {
         </div>
     `;
     
-    // Show oneOf hint if present (e.g., "client_id or webhook_url")
-    if (schema.oneOf_hint) {
-        const hintKey = `channel.oneOfHint.${schema.oneOf_hint.replace(/ or /g, '_or_')}`;
-        const localizedHint = t(hintKey);
-        const displayHint = localizedHint.startsWith('channel.') ? schema.oneOf_hint : localizedHint;
-        html += `
-            <div class="form-hint-box">
-                <span class="hint-icon">ℹ</span>
-                <span>${t('channel.configHint')}: ${displayHint}</span>
-            </div>
-        `;
-    }
+    // Get current connection_mode value for conditional rendering
+    const connectionModeValue = values.config?.connection_mode;
+    const currentMode = (connectionModeValue !== undefined && connectionModeValue !== '') 
+                        ? connectionModeValue 
+                        : (properties.connection_mode?.default || '');
     
     // Generate fields from schema properties
     for (const [key, prop] of Object.entries(properties)) {
-        const isRequired = required.includes(key);
-        const value = values.config?.[key] || '';
+        const rawValue = values.config?.[key];
+        const value = (rawValue !== undefined && rawValue !== '') ? rawValue : (prop.default || '');
+        
+        // Handle enum fields (render as select dropdown)
+        if (prop.enum && Array.isArray(prop.enum)) {
+            const title = getFieldText(key, 'title', prop.title || key);
+            const description = getFieldText(key, 'description', prop.description || '');
+            const enumLabels = prop.enumLabels || {};
+            
+            html += `
+                <div class="form-group">
+                    <label>${title} <span class="required">*</span></label>
+                    <select name="${key}" class="form-select" data-mode-selector="${key === 'connection_mode'}">
+                        ${prop.enum.map(opt => {
+                            const label = getFieldText(`${key}.${opt}`, 'label', enumLabels[opt] || opt);
+                            const selected = value === opt ? 'selected' : '';
+                            return `<option value="${opt}" ${selected}>${label}</option>`;
+                        }).join('')}
+                    </select>
+                    ${description ? `<span class="hint">${description}</span>` : ''}
+                </div>
+            `;
+            continue;
+        }
+        
+        // Check if field has showWhen condition
+        const showWhen = prop.showWhen;
+        let shouldShow = true;
+        let showWhenAttr = '';
+        
+        if (showWhen && typeof showWhen === 'object') {
+            showWhenAttr = `data-show-when='${JSON.stringify(showWhen)}'`;
+            // Check if current mode matches the condition
+            for (const [condKey, condValue] of Object.entries(showWhen)) {
+                const currentCondValue = values.config?.[condKey] || properties[condKey]?.default || '';
+                if (currentCondValue !== condValue) {
+                    shouldShow = false;
+                    break;
+                }
+            }
+        }
+        
+        // Determine if field is required based on current mode
+        let isRequired = required.includes(key);
+        if (requiredByMode && currentMode) {
+            const modeRequired = requiredByMode[currentMode] || [];
+            if (modeRequired.includes(key)) {
+                isRequired = true;
+            }
+        }
+        
         const inputType = prop.type === 'string' && (key.toLowerCase().includes('secret') || key.toLowerCase().includes('password')) ? 'password' : 'text';
         
         // Get localized text with fallback to schema values
@@ -404,16 +447,77 @@ function renderConfigForm(schema, values = {}) {
         const placeholder = getFieldText(key, 'placeholder', prop.placeholder || prop.description || '');
         
         html += `
-            <div class="form-group">
+            <div class="form-group" ${showWhenAttr} style="${shouldShow ? '' : 'display: none;'}">
                 <label>${title} ${isRequired ? '<span class="required">*</span>' : ''}</label>
                 <input type="${inputType}" name="${key}" value="${value}" 
-                       placeholder="${placeholder}" ${isRequired ? 'required' : ''}>
+                       placeholder="${placeholder}" ${isRequired ? 'data-conditional-required="true"' : ''}>
                 ${description ? `<span class="hint">${description}</span>` : ''}
             </div>
         `;
     }
     
     return html;
+}
+
+/**
+ * Handle connection mode change - show/hide fields dynamically
+ */
+function handleModeChange(selectElement, schema) {
+    const selectedMode = selectElement.value;
+    const form = selectElement.closest('.config-form') || selectElement.closest('#configForm');
+    if (!form) return;
+    
+    const requiredByMode = schema?.required_by_mode || {};
+    const modeRequired = requiredByMode[selectedMode] || [];
+    
+    // Find all fields with showWhen conditions
+    form.querySelectorAll('[data-show-when]').forEach(group => {
+        const showWhen = JSON.parse(group.dataset.showWhen);
+        let shouldShow = true;
+        
+        for (const [condKey, condValue] of Object.entries(showWhen)) {
+            const condInput = form.querySelector(`[name="${condKey}"]`);
+            if (condInput && condInput.value !== condValue) {
+                shouldShow = false;
+                break;
+            }
+        }
+        
+        group.style.display = shouldShow ? '' : 'none';
+        
+        // Update required state for inputs
+        const input = group.querySelector('input, select');
+        if (input && input.name) {
+            const isRequired = modeRequired.includes(input.name);
+            if (isRequired) {
+                input.setAttribute('data-conditional-required', 'true');
+            } else {
+                input.removeAttribute('data-conditional-required');
+            }
+            // Update required asterisk
+            const label = group.querySelector('label');
+            if (label) {
+                const existingRequired = label.querySelector('.required');
+                if (isRequired && !existingRequired) {
+                    label.innerHTML += ' <span class="required">*</span>';
+                } else if (!isRequired && existingRequired) {
+                    existingRequired.remove();
+                }
+            }
+        }
+    });
+}
+
+/**
+ * Bind mode change events after form render
+ */
+function bindModeChangeEvents(schema) {
+    const form = document.getElementById('configForm');
+    if (!form) return;
+    
+    form.querySelectorAll('select[data-mode-selector="true"]').forEach(select => {
+        select.addEventListener('change', () => handleModeChange(select, schema));
+    });
 }
 
 /**
@@ -457,6 +561,9 @@ function showNewConnectionForm() {
     if (form) form.innerHTML = renderConfigForm(currentSchema);
     if (formSection) formSection.style.display = 'block';
     
+    // Bind mode change events for dynamic field display
+    bindModeChangeEvents(currentSchema);
+    
     // Re-bind form events
     document.getElementById('btnCancelForm')?.addEventListener('click', hideConfigForm);
     document.getElementById('btnVerifyConfig')?.addEventListener('click', handleVerify);
@@ -485,6 +592,9 @@ async function showEditConnectionForm(connectionId) {
     if (formTitle) formTitle.textContent = t('channel.editConnection');
     if (form) form.innerHTML = renderConfigForm(currentSchema, connection);
     if (formSection) formSection.style.display = 'block';
+    
+    // Bind mode change events for dynamic field display
+    bindModeChangeEvents(currentSchema);
 }
 
 /**
@@ -569,14 +679,19 @@ async function handleSave() {
     const form = document.getElementById('configForm');
     if (!form) return;
     
-    const inputs = form.querySelectorAll('input');
+    const inputs = form.querySelectorAll('input, select');
     const config = {};
     let name = '';
     let hasValidationError = false;
     
-    // Validate all required fields
+    // Validate all required fields (only visible ones with conditional-required)
     for (const input of inputs) {
-        if (input.required && !input.value.trim()) {
+        const formGroup = input.closest('.form-group');
+        const isVisible = formGroup && formGroup.style.display !== 'none';
+        const isConditionalRequired = input.hasAttribute('data-conditional-required');
+        const isRequired = input.required || (isVisible && isConditionalRequired);
+        
+        if (isRequired && isVisible && !input.value.trim()) {
             input.classList.add('input-error');
             hasValidationError = true;
         } else {

@@ -482,21 +482,40 @@ class WeComHandler(ChannelHandler):
             errors.append("Config must be a dictionary")
             return ChannelValidationResult(valid=False, errors=errors)
         
-        bot_id = config.get("bot_id")
-        webhook_url = config.get("webhook_url")
-        corpid = config.get("corpid")
+        connection_mode = config.get("connection_mode", "webhook")
         
-        if not bot_id and not webhook_url and not corpid:
-            errors.append("Either bot_id (for WebSocket), webhook_url, or corpid is required")
-        
-        if bot_id and not (config.get("bot_secret") or config.get("secret")):
-            errors.append("bot_secret is required when using bot_id")
-        
-        if corpid:
+        if connection_mode == "webhook":
+            if not config.get("webhook_url"):
+                errors.append("webhook_url is required for Webhook mode")
+        elif connection_mode == "websocket":
+            if not config.get("bot_id"):
+                errors.append("bot_id is required for WebSocket mode")
+            if not (config.get("bot_secret") or config.get("secret")):
+                errors.append("bot_secret is required for WebSocket mode")
+        elif connection_mode == "app":
+            if not config.get("corpid"):
+                errors.append("corpid is required for Application mode")
             if not config.get("corpsecret"):
-                errors.append("corpsecret is required when using corpid")
+                errors.append("corpsecret is required for Application mode")
             if not config.get("agentid"):
-                errors.append("agentid is required when using corpid")
+                errors.append("agentid is required for Application mode")
+        else:
+            # Fallback: legacy validation
+            bot_id = config.get("bot_id")
+            webhook_url = config.get("webhook_url")
+            corpid = config.get("corpid")
+            
+            if not bot_id and not webhook_url and not corpid:
+                errors.append("Either bot_id (for WebSocket), webhook_url, or corpid is required")
+            
+            if bot_id and not (config.get("bot_secret") or config.get("secret")):
+                errors.append("bot_secret is required when using bot_id")
+            
+            if corpid:
+                if not config.get("corpsecret"):
+                    errors.append("corpsecret is required when using corpid")
+                if not config.get("agentid"):
+                    errors.append("agentid is required when using corpid")
         
         return ChannelValidationResult(valid=len(errors) == 0, errors=errors)
     
@@ -505,45 +524,44 @@ class WeComHandler(ChannelHandler):
         return {
             "type": "object",
             "title": "WeCom",
-            "description": "WeCom bot configuration (Bot ID for WebSocket, Webhook URL, or Corp ID)",
-            "oneOf_hint": "bot_id or webhook_url or corpid",
+            "description": "WeCom bot configuration",
             "properties": {
+                "connection_mode": {
+                    "type": "string",
+                    "title": "Connection Mode",
+                    "description": "Select connection mode",
+                    "enum": ["websocket", "webhook"],
+                    "enumLabels": {
+                        "websocket": "Long Connection (Intelligent Robot)",
+                        "webhook": "Webhook Robot"
+                    },
+                    "default": "websocket",
+                },
                 "bot_id": {
                     "type": "string",
                     "title": "Bot ID",
-                    "description": "Intelligent robot Bot ID (for WebSocket long connection)",
+                    "description": "Intelligent robot Bot ID",
                     "placeholder": "aib...",
+                    "showWhen": {"connection_mode": "websocket"},
                 },
                 "bot_secret": {
                     "type": "string",
                     "title": "Bot Secret",
-                    "description": "Intelligent robot Secret (required with Bot ID)",
+                    "description": "Intelligent robot Secret",
                     "placeholder": "Bot secret",
+                    "showWhen": {"connection_mode": "websocket"},
                 },
                 "webhook_url": {
                     "type": "string",
                     "title": "Webhook URL",
-                    "description": "Group bot Webhook URL (or use Bot ID/Corp ID)",
+                    "description": "Group bot Webhook address",
                     "placeholder": "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=xxx",
+                    "showWhen": {"connection_mode": "webhook"},
                 },
-                "corpid": {
-                    "type": "string",
-                    "title": "Corp ID",
-                    "description": "WeCom Corp ID (or use Bot ID/Webhook)",
-                    "placeholder": "ww...",
-                },
-                "corpsecret": {
-                    "type": "string",
-                    "title": "Corp Secret",
-                    "description": "Application secret (required with Corp ID)",
-                    "placeholder": "App secret",
-                },
-                "agentid": {
-                    "type": "integer",
-                    "title": "Agent ID",
-                    "description": "Application Agent ID (required with Corp ID)",
-                    "placeholder": "1000001",
-                },
+            },
+            "required_by_mode": {
+                "websocket": ["bot_id", "bot_secret"],
+                "webhook": ["webhook_url"]
             },
         }
     

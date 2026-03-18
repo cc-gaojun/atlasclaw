@@ -66,12 +66,12 @@
       },
       "client_id": {
         "title": "应用 AppKey",
-        "description": "Stream 模式的应用 AppKey（推荐）",
+        "description": "Stream 模式的应用 AppKey",
         "placeholder": "dingxxxxxxxxxx"
       },
       "client_secret": {
         "title": "应用 AppSecret",
-        "description": "应用 AppSecret（与 Client ID 配合使用）",
+        "description": "Stream 模式的应用 AppSecret",
         "placeholder": "应用密钥"
       },
       "corpid": {
@@ -98,6 +98,22 @@
         "title": "智慧机器人密钥",
         "description": "智慧机器人密钥（与 Bot ID 配合使用）",
         "placeholder": "机器人密钥"
+      },
+      "connection_mode": {
+        "title": "对接方式",
+        "description": "选择渠道对接方式",
+        "webhook": {
+          "label": "Webhook（自定义机器人）"
+        },
+        "stream": {
+          "label": "Stream 模式（企业内部应用）"
+        },
+        "websocket": {
+          "label": "长连接（智能机器人）"
+        },
+        "longconnection": {
+          "label": "长连接（企业自建应用）"
+        }
       }
     },
     "back": "← 返回",
