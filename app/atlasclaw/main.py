@@ -12,10 +12,12 @@ Usage:
     uvicorn app.atlasclaw.main:app --host 0.0.0.0 --port 8000
 """
 
+import asyncio
 from contextlib import asynccontextmanager
 from pathlib import Path
 import re
 from typing import Any, Optional
+
 
 from dotenv import load_dotenv
 
@@ -161,7 +163,25 @@ def _expand_env_value(value: str) -> str:
     return value
 
 
+async def _run_mysql_alembic_upgrade(db_config: DatabaseConfig) -> None:
+    """Run Alembic migrations to head for MySQL deployments."""
+    from alembic import command
+    from alembic.config import Config as AlembicConfig
+
+    alembic_ini_path = Path(__file__).parent.parent.parent / "alembic.ini"
+    if not alembic_ini_path.exists():
+        raise RuntimeError(f"alembic.ini not found: {alembic_ini_path}")
+
+    def _upgrade() -> None:
+        alembic_cfg = AlembicConfig(str(alembic_ini_path))
+        alembic_cfg.set_main_option("sqlalchemy.url", db_config.get_connection_url())
+        command.upgrade(alembic_cfg, "head")
+
+    await asyncio.to_thread(_upgrade)
+
+
 def _create_pydantic_model(token: TokenEntry):
+
     if token.api_type == "anthropic":
         from pydantic_ai.models.anthropic import AnthropicModel
         from pydantic_ai.providers.anthropic import AnthropicProvider
@@ -176,12 +196,28 @@ def _create_pydantic_model(token: TokenEntry):
     return OpenAIChatModel(token.model, provider=provider)
 
 
+def _merge_token_entries(primary: list[TokenEntry], secondary: list[TokenEntry]) -> list[TokenEntry]:
+    """Merge tokens by token_id, keeping primary list precedence on conflicts."""
+    merged: list[TokenEntry] = []
+    seen_ids: set[str] = set()
+
+    for token in [*primary, *secondary]:
+        token_id = (token.token_id or "").strip()
+        if not token_id or token_id in seen_ids:
+            continue
+        seen_ids.add(token_id)
+        merged.append(token)
+
+    return merged
+
+
 def _build_token_entries(config) -> tuple[list[TokenEntry], Optional[str]]:
     """Build token entries from config.
 
     Returns:
         tuple of (token_entries, primary_token_id)
     """
+
     tokens: list[TokenEntry] = []
     for token_cfg in config.model.tokens:
         tokens.append(
@@ -258,16 +294,16 @@ async def _build_token_entries_from_db(session) -> tuple[list[TokenEntry], Optio
         tuple of (token_entries, primary_token_id) or (None, None) if database is empty.
     """
     from app.atlasclaw.db.orm.model_token_config import ModelTokenConfigService
-    
-    tokens = await ModelTokenConfigService.list_all(session, is_active=True)
-    
+
+    tokens, _total = await ModelTokenConfigService.list_all(session, is_active=True)
+
     if not tokens:
         return None, None
-    
+
     token_entries: list[TokenEntry] = []
     for token in tokens:
         # Decrypt API key
-        api_key = ModelTokenConfigService.decrypt_api_key(token) or ""
+        api_key = ModelTokenConfigService.get_decrypted_api_key(token) or ""
         token_entries.append(
             TokenEntry(
                 token_id=token.name,
@@ -275,18 +311,44 @@ async def _build_token_entries_from_db(session) -> tuple[list[TokenEntry], Optio
                 model=token.model,
                 base_url=token.base_url or "",
                 api_key=api_key,
-                api_type=token.api_type or "openai",
+                api_type="openai",
                 priority=token.priority,
                 weight=token.weight,
             )
         )
-    
+
     # Use the first active token as primary
     primary_id = token_entries[0].token_id if token_entries else None
     return token_entries, primary_id
 
 
+def _merge_provider_instances(
+    primary: dict[str, dict[str, dict[str, Any]]],
+    secondary: dict[str, dict[str, dict[str, Any]]],
+) -> dict[str, dict[str, dict[str, Any]]]:
+    """Merge provider instances with primary precedence (provider_type + instance_name)."""
+    merged: dict[str, dict[str, dict[str, Any]]] = {}
+
+    for source in [secondary, primary]:
+        for provider_type, instances in (source or {}).items():
+            if not isinstance(instances, dict):
+                continue
+            provider_bucket = merged.setdefault(provider_type, {})
+            for instance_name, instance_cfg in instances.items():
+                provider_bucket[instance_name] = dict(instance_cfg or {})
+
+    return merged
+
+
+async def _build_provider_instances_from_db(session) -> dict[str, dict[str, dict[str, Any]]]:
+    """Build nested provider instance configs from database."""
+    from app.atlasclaw.db.orm.service_provider_config import ServiceProviderConfigService
+
+    return await ServiceProviderConfigService.list_active_as_nested(session)
+
+
 async def _load_agent_config_from_db(session, agent_id: str):
+
     """Load agent configuration from database.
     
     Returns:
@@ -319,20 +381,6 @@ async def _load_agent_config_from_db(session, agent_id: str):
         memory_strategy=memory.get("memory_strategy", ""),
         max_context_rounds=memory.get("max_context_rounds", 20),
     )
-
-
-def _run_db_migrations():
-    """Run database migrations on startup."""
-    try:
-        from alembic.config import Config
-        from alembic import command
-
-        config = Config("alembic.ini")
-        command.upgrade(config, "head")
-        print("[AtlasClaw] Database migrations completed")
-    except Exception as e:
-        print(f"[AtlasClaw] Warning: Database migration failed: {e}")
-        print("[AtlasClaw] Continuing without migrations (tables may be created by ORM)")
 
 
 @asynccontextmanager
@@ -396,14 +444,23 @@ async def lifespan(app: FastAPI):
                 }
             })
             await init_database(db_config)
-            print(f"[AtlasClaw] Database initialized: {db_config.db_type}")
-            
-            # Run migrations
-            _run_db_migrations()
+
+            if db_config.db_type == "sqlite":
+                # SQLite: rely on ORM models to auto-create schema
+                await get_db_manager().create_tables()
+                print("[AtlasClaw] SQLite initialized via ORM models")
+            elif db_config.db_type == "mysql":
+                # MySQL: enterprise mode, schema/data changes managed by Alembic
+                await _run_mysql_alembic_upgrade(db_config)
+                print("[AtlasClaw] MySQL initialized via Alembic migrations")
+            else:
+                raise RuntimeError(f"Unsupported database type: {db_config.db_type}")
+
             db_initialized = True
         except Exception as e:
-            print(f"[AtlasClaw] Warning: Failed to initialize database: {e}")
-            print(f"[AtlasClaw] Falling back to JSON configuration")
+            print(f"[AtlasClaw] Failed to initialize database ({config.database.type}): {e}")
+            raise RuntimeError(f"Database startup failed: {e}") from e
+
     
     # Register built-in channel handlers (enterprise messaging platforms)
     ChannelRegistry.register("feishu", FeishuHandler)
@@ -452,11 +509,35 @@ async def lifespan(app: FastAPI):
     
     _global_provider_registry = ServiceProviderRegistry()
     _global_provider_registry.load_from_directory(providers_root)
-    if config.service_providers:
-        _global_provider_registry.load_instances_from_config(config.service_providers)
-    
+
+    config_provider_instances: dict[str, dict[str, dict[str, Any]]] = {
+        provider_type: dict(instances)
+        for provider_type, instances in (config.service_providers or {}).items()
+        if isinstance(instances, dict)
+    }
+    merged_provider_instances = config_provider_instances
+
+    if db_initialized:
+        try:
+            async with get_db_manager().get_session() as session:
+                db_provider_instances = await _build_provider_instances_from_db(session)
+                if db_provider_instances:
+                    merged_provider_instances = _merge_provider_instances(
+                        db_provider_instances,
+                        config_provider_instances,
+                    )
+                    print(
+                        "[AtlasClaw] Loaded provider configs from database and merged with JSON"
+                    )
+        except Exception as e:
+            print(f"[AtlasClaw] Warning: Failed to load provider configs from database: {e}")
+
+    if merged_provider_instances:
+        _global_provider_registry.load_instances_from_config(merged_provider_instances)
+
     available_providers = {}
     provider_instances = _global_provider_registry.get_all_instance_configs()
+
     for provider_type in _global_provider_registry.list_providers():
         instances = _global_provider_registry.list_instances(provider_type)
         if instances:
@@ -488,27 +569,36 @@ async def lifespan(app: FastAPI):
     from pydantic_ai import Agent
     from app.atlasclaw.core.deps import SkillDeps
 
-    # Load token configurations - try database first, fallback to JSON config
-    token_entries = None
-    primary_token_id = None
-    
+    # Load token configurations from both JSON and database.
+    # Priority: DB tokens override same token_id from JSON, while JSON tokens are still loaded.
+    config_token_entries, config_primary_token_id = _build_token_entries(config)
+    token_entries = list(config_token_entries)
+    primary_token_id = config_primary_token_id
+
+    if token_entries:
+        print(f"[AtlasClaw] Loaded {len(token_entries)} tokens from JSON config")
+
     if db_initialized:
         try:
             async with get_db_manager().get_session() as session:
-                token_entries, primary_token_id = await _build_token_entries_from_db(session)
-                if token_entries:
-                    print(f"[AtlasClaw] Loaded {len(token_entries)} tokens from database")
+                db_token_entries, db_primary_token_id = await _build_token_entries_from_db(session)
+                if db_token_entries:
+                    print(f"[AtlasClaw] Loaded {len(db_token_entries)} tokens from database")
+                    token_entries = _merge_token_entries(db_token_entries, token_entries)
+                    primary_token_id = db_primary_token_id or primary_token_id
+                    print(f"[AtlasClaw] Combined token pool: {len(token_entries)} (database + JSON)")
         except Exception as e:
             print(f"[AtlasClaw] Warning: Failed to load tokens from database: {e}")
-    
-    # Fallback to JSON config if database is empty or not initialized
-    if not token_entries:
-        token_entries, primary_token_id = _build_token_entries(config)
-        if token_entries:
-            print(f"[AtlasClaw] Loaded {len(token_entries)} tokens from JSON config")
-    
+
     if not token_entries:
         raise RuntimeError("No token configurations found. Please configure tokens in database or atlasclaw.json")
+
+    if primary_token_id and not any(t.token_id == primary_token_id for t in token_entries):
+        print(f"[AtlasClaw] Warning: primary token '{primary_token_id}' not found, using first token")
+        primary_token_id = token_entries[0].token_id
+    elif not primary_token_id:
+        primary_token_id = token_entries[0].token_id
+
 
     token_pool = TokenPool()
     for token in token_entries:
@@ -588,8 +678,8 @@ async def lifespan(app: FastAPI):
             print(f"[AtlasClaw] Error starting channel connections: {e}")
     
     # Schedule connection startup (will run after event loop starts)
-    import asyncio
     asyncio.create_task(start_enabled_connections(db_initialized))
+
 
     webhook_manager = WebhookDispatchManager(config.webhook, _skill_registry)
     webhook_manager.validate_startup()

@@ -26,14 +26,21 @@ from app.atlasclaw.db.schemas import (
     TokenUpdate,
     TokenResponse,
     TokenListResponse,
+    ServiceProviderConfigCreate,
+    ServiceProviderConfigUpdate,
+    ServiceProviderConfigResponse,
+    ServiceProviderConfigListResponse,
     UserCreate,
+
     UserUpdate,
     UserResponse,
     UserListResponse,
 )
 from app.atlasclaw.db.orm.agent_config import AgentConfigService
 from app.atlasclaw.db.orm.model_token_config import ModelTokenConfigService
+from app.atlasclaw.db.orm.service_provider_config import ServiceProviderConfigService
 from app.atlasclaw.db.orm.user import UserService
+
 
 router = APIRouter(prefix="/api", tags=["Database API"])
 
@@ -187,7 +194,116 @@ async def delete_token_config(
         raise HTTPException(status_code=404, detail="Token config not found")
 
 
+# ============== Service Provider Config Routes ==============
+
+
+@router.post("/provider-configs", response_model=ServiceProviderConfigResponse, status_code=201)
+async def create_provider_config(
+    provider_data: ServiceProviderConfigCreate,
+    session: AsyncSession = Depends(get_db_session),
+) -> ServiceProviderConfigResponse:
+    """Create a new service provider instance configuration."""
+    existing = await ServiceProviderConfigService.get_by_provider_instance(
+        session,
+        provider_data.provider_type,
+        provider_data.instance_name,
+    )
+    if existing:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"Provider config '{provider_data.provider_type}.{provider_data.instance_name}' already exists"
+            ),
+        )
+
+    item = await ServiceProviderConfigService.create(session, provider_data)
+    return ServiceProviderConfigResponse.model_validate(item)
+
+
+@router.get("/provider-configs", response_model=ServiceProviderConfigListResponse)
+async def list_provider_configs(
+    provider_type: Optional[str] = Query(None, description="Filter by provider type"),
+    is_active: Optional[bool] = Query(None, description="Filter by active status"),
+    page: int = Query(1, ge=1, description="Page number"),
+    page_size: int = Query(20, ge=1, le=100, description="Items per page"),
+    session: AsyncSession = Depends(get_db_session),
+) -> ServiceProviderConfigListResponse:
+    """List service provider instance configurations with optional filtering."""
+    items, total = await ServiceProviderConfigService.list_all(
+        session,
+        provider_type=provider_type,
+        is_active=is_active,
+        page=page,
+        page_size=page_size,
+    )
+    return ServiceProviderConfigListResponse(
+        provider_configs=[ServiceProviderConfigResponse.model_validate(i) for i in items],
+        total=total,
+    )
+
+
+@router.get("/provider-configs/{config_id}", response_model=ServiceProviderConfigResponse)
+async def get_provider_config(
+    config_id: str,
+    session: AsyncSession = Depends(get_db_session),
+) -> ServiceProviderConfigResponse:
+    """Get service provider instance config by ID."""
+    item = await ServiceProviderConfigService.get_by_id(session, config_id)
+    if item is None:
+        raise HTTPException(status_code=404, detail="Provider config not found")
+    return ServiceProviderConfigResponse.model_validate(item)
+
+
+@router.put("/provider-configs/{config_id}", response_model=ServiceProviderConfigResponse)
+async def update_provider_config(
+    config_id: str,
+    provider_data: ServiceProviderConfigUpdate,
+    session: AsyncSession = Depends(get_db_session),
+) -> ServiceProviderConfigResponse:
+    """Update a service provider instance config."""
+    update_payload = provider_data.model_dump(exclude_unset=True)
+
+    target_provider_type = update_payload.get("provider_type")
+    target_instance_name = update_payload.get("instance_name")
+    if target_provider_type or target_instance_name:
+        current = await ServiceProviderConfigService.get_by_id(session, config_id)
+        if current is None:
+            raise HTTPException(status_code=404, detail="Provider config not found")
+
+        check_provider_type = target_provider_type or current.provider_type
+        check_instance_name = target_instance_name or current.instance_name
+        duplicate = await ServiceProviderConfigService.get_by_provider_instance(
+            session,
+            check_provider_type,
+            check_instance_name,
+        )
+        if duplicate and duplicate.id != config_id:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"Provider config '{check_provider_type}.{check_instance_name}' already exists"
+                ),
+            )
+
+    item = await ServiceProviderConfigService.update(session, config_id, provider_data)
+    if item is None:
+        raise HTTPException(status_code=404, detail="Provider config not found")
+    return ServiceProviderConfigResponse.model_validate(item)
+
+
+@router.delete("/provider-configs/{config_id}", status_code=204)
+async def delete_provider_config(
+    config_id: str,
+    session: AsyncSession = Depends(get_db_session),
+) -> None:
+    """Delete a service provider instance config."""
+    deleted = await ServiceProviderConfigService.delete(session, config_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Provider config not found")
+
+
 # ============== User Routes ==============
+
 
 
 @router.post("/users", response_model=UserResponse, status_code=201)

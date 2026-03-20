@@ -118,7 +118,52 @@ class TokenListResponse(BaseModel):
     total: int
 
 
+# ============== Service Provider Config Schemas ==============
+
+
+class ServiceProviderConfigBase(BaseModel):
+    """Base schema for service provider instance config."""
+
+    provider_type: str = Field(..., min_length=1, max_length=100, description="Provider type")
+    instance_name: str = Field(..., min_length=1, max_length=100, description="Instance name")
+    config: Dict[str, Any] = Field(default_factory=dict, description="Provider instance config")
+    is_active: bool = Field(default=True, description="Whether this instance is active")
+
+
+class ServiceProviderConfigCreate(ServiceProviderConfigBase):
+    """Schema for creating a service provider instance config."""
+
+    pass
+
+
+class ServiceProviderConfigUpdate(BaseModel):
+    """Schema for updating a service provider instance config."""
+
+    provider_type: Optional[str] = Field(default=None, max_length=100)
+    instance_name: Optional[str] = Field(default=None, max_length=100)
+    config: Optional[Dict[str, Any]] = None
+    is_active: Optional[bool] = None
+
+
+class ServiceProviderConfigResponse(ServiceProviderConfigBase):
+    """Schema for service provider instance config API response."""
+
+    id: str
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class ServiceProviderConfigListResponse(BaseModel):
+    """Schema for service provider instance config list API response."""
+
+    provider_configs: List[ServiceProviderConfigResponse]
+    total: int
+
+
 # ============== User Schemas ==============
+
 
 
 class UserBase(BaseModel):

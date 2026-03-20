@@ -288,7 +288,7 @@ Manages provider templates, instance configurations, and skill registration with
 | Method | Signature | Description |
 |---|---|---|
 | `load_from_directory` | `(providers_dir: Path) -> int` | Load provider templates from directory |
-| `load_instances_from_config` | `(config: dict) -> None` | Load instance configurations |
+| `load_instances_from_config` | `(config: dict) -> None` | Load instance configurations (merged JSON + DB) |
 | `list_providers` | `() -> list[str]` | List all provider types |
 | `list_instances` | `(provider_type: str) -> list[str]` | List instances for a provider |
 | `get_instance_config` | `(provider_type, instance_name) -> Optional[dict]` | Get raw instance config |
@@ -296,9 +296,33 @@ Manages provider templates, instance configurations, and skill registration with
 | `get_provider_context` | `(provider_type: str) -> Optional[ProviderContext]` | Get LLM context for provider |
 | `register_skills_to` | `(skill_registry) -> int` | Register provider skills with instance wrappers |
 
+**Instance Config Merge Behavior**:
+1. JSON config (`atlasclaw.json` `service_providers`) loaded first
+2. DB configs (`service_provider_configs` table) loaded second
+3. DB entries override JSON entries with same `(provider_type, instance_name)`
+
 Instance wrapper logic: when a skill is invoked, if the provider has a single instance it is auto-selected; if multiple instances exist, the LLM is prompted to choose.
 
 **Environment Variable Resolution**: Config values containing `${VAR_NAME}` or `${VAR_NAME:default}` are resolved at load time.
+
+**Database Persistence** (`app/atlasclaw/db/orm/service_provider_config.py`):
+
+| Service Method | Description |
+|---|---|
+| `create(session, data)` | Create new provider instance config |
+| `get_by_id(session, id)` | Get by primary key |
+| `get_by_provider_instance(session, type, name)` | Get by unique (type, name) |
+| `list_all(session, ...)` | Paginated list with filters |
+| `list_active_as_nested(session)` | Return active configs as nested dict for merge |
+| `update(session, id, data)` | Update config fields |
+| `delete(session, id)` | Soft delete (or hard delete) |
+
+**API Endpoints** (`/api/provider-configs`):
+- `POST /provider-configs` — Create (returns 201)
+- `GET /provider-configs` — List with pagination/filtering
+- `GET /provider-configs/{id}` — Get by ID
+- `PUT /provider-configs/{id}` — Update
+- `DELETE /provider-configs/{id}` — Delete (returns 204)
 
 ### 1.6 Tenant Management (`core/tenant.py`)
 
@@ -749,7 +773,39 @@ WebSocket frame protocol for persistent connections.
 
 **Frame Dataclasses**: `ConnectFrame`, `HelloOkFrame`, `RequestFrame`, `ResponseFrame`, `EventFrame`
 
-### 4.4 Other API Modules
+### 4.4 Database API Routes (`api/api_routes.py`)
+
+REST endpoints for configuration management with DB persistence.
+
+**Agent Configs** (`/api/agent-configs`):
+- `POST /agent-configs` — Create agent configuration
+- `GET /agent-configs` — List with pagination
+- `GET /agent-configs/{id}` — Get by ID
+- `PUT /agent-configs/{id}` — Update
+- `DELETE /agent-configs/{id}` — Delete
+
+**Token Configs** (`/api/token-configs`):
+- `POST /token-configs` — Create token (API key encrypted at rest)
+- `GET /token-configs` — List with pagination
+- `GET /token-configs/{id}` — Get by ID
+- `PUT /token-configs/{id}` — Update
+- `DELETE /token-configs/{id}` — Delete
+
+**Provider Configs** (`/api/provider-configs`):
+- `POST /provider-configs` — Create provider instance config
+- `GET /provider-configs` — List with filters (`provider_type`, `is_active`)
+- `GET /provider-configs/{id}` — Get by ID
+- `PUT /provider-configs/{id}` — Update
+- `DELETE /provider-configs/{id}` — Delete
+
+**Users** (`/api/users`):
+- `POST /users` — Create user (password hashed with bcrypt)
+- `GET /users` — List with pagination
+- `GET /users/{id}` — Get by ID
+- `PUT /users/{id}` — Update
+- `DELETE /users/{id}` — Delete
+
+### 4.5 Other API Modules
 
 | File | Purpose |
 |---|---|
@@ -1241,7 +1297,125 @@ Extensible lifecycle hook system with sequential and parallel execution modes.
 
 ---
 
-## 11. Models Module
+## 11. Database Module
+
+**Path**: `app/atlasclaw/db/`
+
+Relational database abstraction with SQLAlchemy ORM, supporting SQLite (default) and MySQL (enterprise).
+
+### 11.1 Database Configuration (`db/database.py`)
+
+**Dataclass: `DatabaseConfig`**
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `db_type` | `str` | `"sqlite"` | Database type: `sqlite` or `mysql` |
+| `sqlite_path` | `Optional[str]` | `None` | SQLite file path (relative or absolute) |
+| `mysql_host` | `Optional[str]` | `None` | MySQL host |
+| `mysql_port` | `int` | `3306` | MySQL port |
+| `mysql_database` | `Optional[str]` | `None` | MySQL database name |
+| `mysql_user` | `Optional[str]` | `None` | MySQL username |
+| `mysql_password` | `Optional[str]` | `None` | MySQL password |
+| `mysql_charset` | `str` | `"utf8mb4"` | MySQL charset |
+| `pool_size` | `int` | `5` | Connection pool size |
+| `max_overflow` | `int` | `10` | Max overflow connections |
+| `echo` | `bool` | `False` | Log SQL statements |
+
+**Class: `DatabaseManager`**
+
+| Method | Signature | Description |
+|---|---|---|
+| `create_tables` | `() -> None` | Create all tables from ORM models (SQLite mode) |
+| `get_session` | `() -> AsyncSession` | Get async SQLAlchemy session |
+| `close` | `() -> None` | Close all connections |
+
+**Module Functions**:
+- `init_database(config: DatabaseConfig) -> DatabaseManager` — Initialize and return manager
+- `get_db_manager() -> DatabaseManager` — Get singleton instance
+
+### 11.2 ORM Models (`db/models.py`)
+
+**Base: `Base`** — SQLAlchemy declarative base.
+
+| Model | Table | Purpose |
+|---|---|---|
+| `AgentModel` | `agents` | Agent configuration |
+| `ModelTokenConfigModel` | `model_token_configs` | LLM token/API keys |
+| `UserModel` | `users` | User accounts |
+| `ChannelModel` | `channels` | Channel configurations |
+| `ServiceProviderConfigModel` | `service_provider_configs` | Provider instance configs |
+
+**Common Fields**:
+- `id: str` — UUID primary key
+- `created_at: datetime` — Creation timestamp
+- `updated_at: datetime` — Last update timestamp
+
+### 11.3 ORM Services (`db/orm/`)
+
+Each model has a corresponding service class for CRUD operations:
+
+**AgentConfigService** (`db/orm/agent_config.py`):
+- `create(session, data: AgentCreate) -> AgentModel`
+- `get_by_id(session, id) -> Optional[AgentModel]`
+- `get_by_name(session, name) -> Optional[AgentModel]`
+- `list_all(session, page, page_size) -> tuple[list[AgentModel], int]`
+- `update(session, id, data: AgentUpdate) -> Optional[AgentModel]`
+- `delete(session, id) -> bool`
+
+**ModelTokenConfigService** (`db/orm/model_token_config.py`):
+- `create(session, data: TokenCreate) -> ModelTokenConfigModel`
+- `get_by_id(session, id) -> Optional[ModelTokenConfigModel]`
+- `get_by_name(session, name) -> Optional[ModelTokenConfigModel]`
+- `list_all(session, is_active, page, page_size) -> tuple[list[ModelTokenConfigModel], int]`
+- `update(session, id, data: TokenUpdate) -> Optional[ModelTokenConfigModel]`
+- `delete(session, id) -> bool`
+- `get_decrypted_api_key(token) -> str` — Decrypt API key
+- `get_masked_api_key(token) -> str` — Mask for display
+
+**ServiceProviderConfigService** (`db/orm/service_provider_config.py`):
+- `create(session, data: ServiceProviderConfigCreate) -> ServiceProviderConfigModel`
+- `get_by_id(session, id) -> Optional[ServiceProviderConfigModel]`
+- `get_by_provider_instance(session, provider_type, instance_name) -> Optional[ServiceProviderConfigModel]`
+- `list_all(session, provider_type, is_active, page, page_size) -> tuple[list[ServiceProviderConfigModel], int]`
+- `list_active_as_nested(session) -> dict[str, dict[str, dict]]` — Return nested dict for merge
+- `update(session, id, data: ServiceProviderConfigUpdate) -> Optional[ServiceProviderConfigModel]`
+- `delete(session, id) -> bool`
+
+**UserService** (`db/orm/user.py`):
+- `create(session, data: UserCreate) -> UserModel`
+- `get_by_id(session, id) -> Optional[UserModel]`
+- `get_by_username(session, username) -> Optional[UserModel]`
+- `list_all(session, page, page_size) -> tuple[list[UserModel], int]`
+- `update(session, id, data: UserUpdate) -> Optional[UserModel]`
+- `delete(session, id) -> bool`
+- `verify_password(password, hash) -> bool` — Verify bcrypt password
+
+### 11.4 Pydantic Schemas (`db/schemas.py`)
+
+Request/response schemas for API validation:
+
+| Schema | Purpose |
+|---|---|
+| `AgentCreate/AgentUpdate/AgentResponse` | Agent CRUD |
+| `TokenCreate/TokenUpdate/TokenResponse` | Token CRUD |
+| `ServiceProviderConfigCreate/Update/Response` | Provider config CRUD |
+| `UserCreate/UserUpdate/UserResponse` | User CRUD |
+| `ChannelCreate/ChannelUpdate/ChannelResponse` | Channel CRUD |
+
+### 11.5 Migrations (`migrations/`)
+
+**Alembic Configuration** (`alembic.ini`):
+- SQLite: Auto-create via ORM (no migrations needed)
+- MySQL: Requires `alembic upgrade head` on startup
+
+**Migration Files** (`migrations/versions/`):
+- `001_initial.py` — Initial schema (agents, tokens, users, channels)
+- `002_add_channel_is_default.py` — Add `is_default` to channels
+- `003_add_service_provider_configs.py` — Add `service_provider_configs` table
+
+---
+
+## 12. Models Module
 
 **Path**: `app/atlasclaw/models/`
 

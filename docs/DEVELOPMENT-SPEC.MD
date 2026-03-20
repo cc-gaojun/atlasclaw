@@ -1261,11 +1261,43 @@ Configure LLM provider in `atlasclaw.json`:
 }
 ```
 
+**Database Configuration**:
+
+```json
+{
+  "database": {
+    "type": "sqlite",
+    "sqlite": {
+      "path": "./data/atlasclaw.db"
+    },
+    "mysql": {
+      "host": "${MYSQL_HOST}",
+      "port": 3306,
+      "database": "${MYSQL_DATABASE}",
+      "user": "${MYSQL_USER}",
+      "password": "${MYSQL_PASSWORD}",
+      "charset": "utf8mb4"
+    }
+  }
+}
+```
+
+| Mode | Type | Initialization |
+|---|---|---|
+| Development/Single-node | SQLite | Auto-create via ORM on startup |
+| Enterprise/Multi-node | MySQL | Requires `alembic upgrade head` |
+
 Create `.env` file for secrets:
 
 ```bash
 # LLM API Keys
 DEEPSEEK_API_KEY=your-api-key-here
+
+# MySQL (only needed for enterprise mode)
+MYSQL_HOST=localhost
+MYSQL_DATABASE=atlasclaw
+MYSQL_USER=atlasclaw
+MYSQL_PASSWORD=your-password
 
 # Optional: Custom config path
 ATLASCLAW_CONFIG=/path/to/atlasclaw.json
@@ -1362,7 +1394,30 @@ services:
     restart: unless-stopped
 ```
 
-### 12.6 Production Deployment
+### 12.6 Database Migrations (MySQL Mode)
+
+For enterprise deployments using MySQL, run migrations before starting the service:
+
+```bash
+# Set database environment variables
+export MYSQL_HOST=localhost
+export MYSQL_DATABASE=atlasclaw
+export MYSQL_USER=atlasclaw
+export MYSQL_PASSWORD=your-password
+
+# Run Alembic migrations
+alembic upgrade head
+
+# Start service
+uvicorn app.atlasclaw.main:app --host 0.0.0.0 --port 8000
+```
+
+**Migration Files**:
+- `migrations/versions/001_initial.py` — Initial schema
+- `migrations/versions/002_add_channel_is_default.py` — Add channel defaults
+- `migrations/versions/003_add_service_provider_configs.py` — Add provider configs
+
+### 12.7 Production Deployment
 
 **Nginx reverse proxy**:
 ```nginx

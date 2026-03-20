@@ -14,7 +14,8 @@ import uuid
 from datetime import datetime
 from typing import Any, Dict, Optional
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, JSON
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, JSON, UniqueConstraint
+
 from sqlalchemy.dialects.mysql import JSON as MySQLJSON
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -92,11 +93,38 @@ class TokenModel(Base):
         return f"<TokenModel(id={self.id}, name={self.name}, provider={self.provider})>"
 
 
+class ServiceProviderConfigModel(Base):
+    """Service provider instance configuration stored in database."""
+
+    __tablename__ = "service_provider_configs"
+    __table_args__ = (
+        UniqueConstraint("provider_type", "instance_name", name="uq_provider_instance"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
+
+    provider_type: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
+    instance_name: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
+    config: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSON, nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
+    )
+
+    def __repr__(self) -> str:
+        return (
+            f"<ServiceProviderConfigModel(id={self.id}, "
+            f"provider_type={self.provider_type}, instance_name={self.instance_name})>"
+        )
+
+
 class UserModel(Base):
     """User account for authentication and authorization.
 
     Passwords are stored as bcrypt hashes.
     """
+
 
     __tablename__ = "users"
 

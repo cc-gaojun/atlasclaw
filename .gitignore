@@ -15,4 +15,5 @@ workspace/
 **/.pytest_cache/
 
 .env
-nul
+nuldata/*.db  
+data/  

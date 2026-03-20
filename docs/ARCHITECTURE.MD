@@ -42,15 +42,42 @@ AtlasClaw never creates its own authorization layer. Every operation inherits th
 
 All I/O-bound operations are async. The framework uses `asyncio.Event` for cancellation/coordination signals, async iterators for streaming, and `asyncio.Lock` for per-session concurrency control. Blocking operations are not permitted in the request path.
 
-### 1.4 File-System Storage
+### 1.4 Hybrid Storage Model
 
-State persistence uses the local file system with structured formats:
+AtlasClaw uses a hybrid storage approach combining file-system and relational database:
+
+**File-System Storage** (lightweight/embedded mode):
 - **Sessions**: JSONL (one JSON object per line, append-only)
 - **Memory**: Markdown files (daily date-scoped + long-term)
 - **Configuration**: JSON/YAML files with environment variable interpolation
 - **Users**: JSON (shadow user store)
 
-No external database is required. This simplifies deployment and supports embedded-mode operation.
+**Relational Database** (enterprise mode):
+- **SQLite** (default): Zero-config, file-based, auto-creates schema via ORM on startup
+- **MySQL** (enterprise): Requires Alembic migrations for DDL/DML management
+
+**Database Configuration** (`atlasclaw.json`):
+```json
+{
+  "database": {
+    "type": "sqlite",
+    "sqlite": { "path": "./data/atlasclaw.db" },
+    "mysql": {
+      "host": "${MYSQL_HOST}",
+      "port": 3306,
+      "database": "${MYSQL_DATABASE}",
+      "user": "${MYSQL_USER}",
+      "password": "${MYSQL_PASSWORD}",
+      "charset": "utf8mb4"
+    }
+  }
+}
+```
+
+**Key Design Principles**:
+- SQLite: No manual SQL needed; schema controlled by ORM models
+- MySQL: Enterprise deployments use Alembic for migration control
+- Provider configs merge: JSON config + DB entries, with DB taking precedence on same `(provider_type, instance_name)`
 
 ### 1.5 Multi-Channel Access
 
@@ -303,7 +330,9 @@ The `lifespan()` async context manager executes this ordered sequence:
 6. **Load agent definitions** — `AgentLoader` reads `SOUL.md`, `IDENTITY.md`, `USER.md`, `MEMORY.md` from `agents/main/`
 7. **Initialize TokenPool** — Creates `TokenPool` from `model.tokens` config, restores health state from `TokenHealthStore`
 8. **Initialize SessionManager** — Creates session manager with configured reset mode
-9. **Load ServiceProviderRegistry** — Reads service provider configurations, resolves environment variables
+9. **Initialize Database** — SQLite (auto-create via ORM) or MySQL (Alembic migrations)
+10. **Load TokenPool** — Creates `TokenPool` from merged JSON + DB token configs (DB takes precedence on same token_id)
+11. **Load ServiceProviderRegistry** — Reads provider templates from disk, merges JSON + DB instance configs (DB takes precedence on same provider_type.instance_name)
 10. **Register built-in tools** — `register_builtin_tools()` with the configured `ToolProfile`
 11. **Load skills** — From 4 sources in priority order: workspace → workspace providers → global → built-in
 12. **Create AgentInstancePool** — Creates pool for agent instance caching with concurrency control
@@ -766,6 +795,46 @@ Configurable via `BlockChunkerConfig`, controls how streaming text is chunked fo
 }
 ```
 
+### 11.6 Relational Database (Enterprise)
+
+**Tables** (SQLAlchemy ORM models in `app/atlasclaw/db/models.py`):
+
+| Table | Purpose | Key Fields |
+|---|---|---|
+| `agents` | Agent configuration storage | `id`, `name` (unique), `display_name`, `identity` (JSON), `soul` (JSON), `memory` (JSON) |
+| `model_token_configs` | LLM token/API key storage | `id`, `name` (unique), `provider`, `model`, `api_key_encrypted`, `priority`, `weight` |
+| `users` | User accounts | `id`, `username` (unique), `password_hash`, `roles` (JSON) |
+| `channels` | Channel configurations | `id`, `name`, `type`, `user_id`, `config` (JSON), `is_default` |
+| `service_provider_configs` | Provider instance configs | `id`, `provider_type`, `instance_name`, `config` (JSON), `is_active` |
+
+**Unique Constraints**:
+- `agents.name`
+- `model_token_configs.name`
+- `users.username`
+- `service_provider_configs.(provider_type, instance_name)`
+
+**API Endpoints** (`/api/*`):
+- `GET/POST /agent-configs` — Agent CRUD
+- `GET/POST /token-configs` — Token CRUD
+- `GET/POST /users` — User CRUD
+- `GET/POST /provider-configs` — Provider instance CRUD
+
+**Merge Behavior**:
+- Tokens: DB entries override JSON entries with same `token_id`
+- Provider instances: DB entries override JSON entries with same `(provider_type, instance_name)`
+
+### 11.7 Database Initialization
+
+**SQLite Mode** (default):
+- Schema auto-created via `Base.metadata.create_all()` on startup
+- No manual migrations required
+- Suitable for development and single-node deployments
+
+**MySQL Mode** (enterprise):
+- Requires Alembic migrations (`alembic upgrade head`)
+- Migrations located in `migrations/versions/`
+- Suitable for multi-node and production deployments
+
 ---
 
 ## 12. Technology Stack
@@ -782,6 +851,8 @@ Configurable via `BlockChunkerConfig`, controls how streaming text is chunked fo
 | HTTP client | httpx | Async HTTP requests |
 | Testing | pytest + pytest-asyncio | Test framework with async support |
 | Process management | multiprocessing | Feishu SDK isolation |
+| ORM | SQLAlchemy 2.0 + async | Database models and queries |
+| Migrations | Alembic | MySQL DDL/DML version control |
 
 ### Frontend
 
@@ -796,7 +867,7 @@ Configurable via `BlockChunkerConfig`, controls how streaming text is chunked fo
 
 - **Python**: 3.10+ (3.11+ recommended)
 - **Node.js**: For frontend build only
-- **No external database**: File-system storage only
+- **Database**: SQLite (default, zero-config) or MySQL (enterprise, via Alembic)
 - **No Redis**: Optional for caching (not required)
 
 ---
