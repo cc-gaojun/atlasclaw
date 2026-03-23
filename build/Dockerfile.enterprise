@@ -1,5 +1,5 @@
-# AtlasClaw Enterprise Build
-# Multi-stage build for production deployment
+# AtlasClaw Enterprise Edition
+# Multi-stage build for production deployment with MySQL support
 
 FROM python:3.11-slim as builder
 
@@ -40,7 +40,7 @@ COPY alembic.ini .
 # Create necessary directories
 RUN mkdir -p /app/data /app/logs /app/config
 
-# Copy default config (will be overridden by volume mount)
+# Copy default config
 COPY config/atlasclaw.json /app/atlasclaw.json
 
 # Expose port

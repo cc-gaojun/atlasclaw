@@ -1,174 +1,389 @@
-# AtlasClaw Enterprise Build
+# AtlasClaw Deployment Guide
 
-This directory contains the build scripts and configuration for AtlasClaw enterprise deployment.
+This guide describes how to deploy AtlasClaw in your own environment using pre-built Docker images.
 
-## Files
+## Prerequisites
 
-| File | Description |
-|------|-------------|
-| `Dockerfile` | Multi-stage Docker build for AtlasClaw |
-| `docker-compose.yml` | Production deployment with MySQL 8.5 |
-| `build.sh` | Automated build script |
-| `config/` | Configuration directory (auto-generated) |
-| `secrets/` | Secrets directory (auto-generated) |
-| `data/` | Data persistence directory |
-| `logs/` | Log files directory |
-| `mysql-data/` | MySQL data directory |
+### System Requirements
+
+| Component | Minimum | Recommended |
+|-----------|---------|-------------|
+| CPU | 2 cores | 4+ cores |
+| RAM | 4 GB | 8+ GB |
+| Disk | 20 GB SSD | 100+ GB SSD |
+| OS | Linux (CentOS 7+, Ubuntu 18.04+, or equivalent) | Latest LTS |
+
+### Required Software
+
+- **Docker** 20.10 or higher
+- **Docker Compose** 2.0 or higher
+
+### Install Docker
+
+**CentOS/RHEL:**
+```bash
+sudo yum install -y yum-utils
+sudo yum-config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo
+sudo yum install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
+sudo systemctl start docker
+sudo systemctl enable docker
+```
+
+**Ubuntu/Debian:**
+```bash
+sudo apt-get update
+sudo apt-get install -y ca-certificates curl gnupg
+sudo install -m 0755 -d /etc/apt/keyrings
+curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+sudo chmod a+r /etc/apt/keyrings/docker.gpg
+
+echo "deb [arch="$(dpkg --print-architecture)" signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu \
+  "$(. /etc/os-release && echo "$VERSION_CODENAME")" stable" | \
+  sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+
+sudo apt-get update
+sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
+```
+
+**Verify Installation:**
+```bash
+docker --version
+docker compose version
+```
+
+---
 
 ## Quick Start
 
-### 1. Build Docker Image
+### 1. Create Deployment Directory
 
 ```bash
-./build.sh [version_tag]
+mkdir -p /opt/atlasclaw/{config,data,logs}
+cd /opt/atlasclaw
 ```
 
-Example:
+**Directory Structure:**
+
+```
+/opt/atlasclaw/
+├── docker-compose.yml      # Docker Compose orchestration file
+├── config/
+│   └── atlasclaw.json      # Configuration file (mounted to /app/atlasclaw.json in container)
+├── data/                   # Database and runtime data (persisted volume)
+└── logs/                   # Application logs (persisted volume)
+```
+
+The `config/atlasclaw.json` is mounted to `/app/atlasclaw.json` inside the container where the application reads its configuration.
+
+### 2. Download Compose File
+
+Download the appropriate `docker-compose.yml` for your edition:
+
+**OpenSource Edition:**
 ```bash
-./build.sh v1.0.0
+curl -o docker-compose.yml https://your-registry.com/atlasclaw/docker-compose-opensource.yml
 ```
 
-This script will:
-- Check prerequisites (Docker, Python)
-- Install and validate Python dependencies
-- Generate secure passwords and configuration
-- Build the Docker image `atlasclaw-enterprise:latest`
+**Enterprise Edition:**
+```bash
+curl -o docker-compose.yml https://your-registry.com/atlasclaw/docker-compose-enterprise.yml
+```
 
-### 2. Configure
+### 3. Create Configuration
 
-Edit `config/atlasclaw.json` to add your LLM API key and other settings.
+Create `/opt/atlasclaw/config/atlasclaw.json`:
 
-### 3. Deploy
+**OpenSource:**
+```json
+{
+  "workspace": {
+    "path": "./data"
+  },
+  "database": {
+    "type": "sqlite",
+    "sqlite": {
+      "path": "./data/atlasclaw.db"
+    }
+  },
+  "model": {
+    "primary": "deepseek-main",
+    "fallbacks": [],
+    "temperature": 0.2,
+    "tokens": [
+      {
+        "id": "deepseek-main",
+        "provider": "deepseek",
+        "model": "deepseek-chat",
+        "base_url": "https://api.deepseek.com",
+        "api_key": "YOUR_API_KEY_HERE",
+        "api_type": "openai"
+      }
+    ]
+  },
+  "auth": {
+    "provider": "api_key",
+    "api_key": {
+      "keys": {
+        "sk-your-secret-key": {
+          "user_id": "admin",
+          "roles": ["admin"]
+        }
+      }
+    }
+  }
+}
+```
+
+**Enterprise:**
+```json
+{
+  "workspace": {
+    "path": "./data"
+  },
+  "database": {
+    "type": "mysql",
+    "mysql": {
+      "host": "mysql",
+      "port": 3306,
+      "database": "atlasclaw",
+      "user": "atlasclaw",
+      "password": "your-mysql-password",
+      "charset": "utf8mb4"
+    }
+  },
+  "model": {
+    "primary": "deepseek-main",
+    "fallbacks": [],
+    "temperature": 0.2,
+    "tokens": [
+      {
+        "id": "deepseek-main",
+        "provider": "deepseek",
+        "model": "deepseek-chat",
+        "base_url": "https://api.deepseek.com",
+        "api_key": "YOUR_API_KEY_HERE",
+        "api_type": "openai"
+      }
+    ]
+  },
+  "auth": {
+    "provider": "oidc",
+    "oidc": {
+      "issuer": "https://auth.your-company.com",
+      "client_id": "atlasclaw-client",
+      "client_secret": "your-client-secret",
+      "redirect_uri": "https://atlasclaw.your-company.com/api/auth/callback"
+    }
+  }
+}
+```
+
+Set proper permissions:
+```bash
+chmod 600 /opt/atlasclaw/config/atlasclaw.json
+```
+
+### 4. Start AtlasClaw
 
 ```bash
-docker-compose up -d
+cd /opt/atlasclaw
+docker compose up -d
 ```
 
-### 4. Run Migrations
+### 5. Run Database Migrations (Enterprise Only)
 
 ```bash
-docker-compose exec atlasclaw alembic upgrade head
+docker compose exec atlasclaw alembic upgrade head
 ```
 
-### 5. Verify
+### 6. Verify Deployment
 
 ```bash
 curl http://localhost:8000/api/health
 ```
 
-## Build Script Details
+Expected response:
+```json
+{"status": "healthy", "timestamp": "2026-03-23T10:00:00+00:00"}
+```
 
-The `build.sh` script automates the following steps:
+Access the web UI at: `http://your-server-ip:8000`
 
-1. **Prerequisites Check**: Verifies Docker, Docker Compose, and Python are installed
-2. **Dependency Installation**: Installs Python packages from `requirements.txt` for validation
-3. **Configuration Generation**: Creates `atlasclaw.json` and secure MySQL passwords
-4. **File Preparation**: Copies necessary project files to build directory
-5. **Docker Build**: Builds the `atlasclaw-enterprise` image
-6. **Cleanup**: Removes temporary build artifacts
+---
 
-## Configuration
+## Available Images
 
-### atlasclaw.json
+### OpenSource Edition
 
-Main configuration file auto-generated at `config/atlasclaw.json`. You must edit this to:
+- **Image**: `your-registry.com/atlasclaw:latest`
+- **Features**: SQLite database, single container
+- **Best for**: Small teams, evaluation, development
 
-- Add your LLM API key
-- Configure service providers (Jira, ServiceNow, etc.)
-- Set up authentication (OIDC or API key)
+### Enterprise Edition
 
-### Secrets
+- **Image**: `your-registry.com/atlasclaw-official:latest`
+- **Features**: MySQL support, multi-container, high availability
+- **Best for**: Production, large organizations
 
-Passwords are auto-generated and stored in:
+### Pull Images Manually
 
-- `secrets/mysql_root_password.txt` - MySQL root password
-- `secrets/mysql_password.txt` - MySQL atlasclaw user password
+```bash
+# OpenSource
+docker pull your-registry.com/atlasclaw:latest
 
-## Docker Compose Services
+# Enterprise
+docker pull your-registry.com/atlasclaw-official:latest
+```
 
-### atlasclaw
-
-- Image: `atlasclaw-enterprise:latest`
-- Port: `8000`
-- Volumes: config, data, logs
-- Resources: 4 CPU / 8GB RAM (limit), 2 CPU / 4GB RAM (reservation)
-
-### mysql
-
-- Image: `mysql:8.5`
-- Port: `3306` (internal)
-- Volumes: mysql-data
-- Resources: 4 CPU / 4GB RAM (limit), 2 CPU / 2GB RAM (reservation)
+---
 
 ## Operations
 
 ### View Logs
 
 ```bash
-docker-compose logs -f atlasclaw
-docker-compose logs -f mysql
+docker compose logs -f atlasclaw
 ```
 
 ### Stop Services
 
 ```bash
-docker-compose down
+docker compose down
 ```
 
-### Update
+### Update to Latest Version
 
 ```bash
-# Pull latest image
-docker-compose pull
+# Pull latest images
+docker compose pull
 
-# Or rebuild
-./build.sh
+# Restart services
+docker compose up -d
 
-# Restart with migrations
-docker-compose up -d
-docker-compose exec atlasclaw alembic upgrade head
+# Enterprise only: run migrations
+docker compose exec atlasclaw alembic upgrade head
 ```
 
 ### Backup
 
+**OpenSource:**
+```bash
+# Backup data directory
+tar -czf atlasclaw-backup-$(date +%Y%m%d).tar.gz /opt/atlasclaw/data /opt/atlasclaw/config
+```
+
+**Enterprise:**
 ```bash
 # Backup database
-docker exec atlasclaw-mysql mysqldump -u root -p atlasclaw > backup.sql
+docker exec atlasclaw-mysql mysqldump -u root -p atlasclaw > atlasclaw-db-$(date +%Y%m%d).sql
 
-# Backup data
-tar -czf atlasclaw-backup.tar.gz config/ data/ logs/
+# Backup files
+tar -czf atlasclaw-backup-$(date +%Y%m%d).tar.gz /opt/atlasclaw/data /opt/atlasclaw/config
 ```
+
+---
+
+## Configuration Reference
+
+### LLM Provider
+
+Configure in `atlasclaw.json`:
+
+```json
+{
+  "model": {
+    "primary": "deepseek-main",
+    "tokens": [
+      {
+        "id": "deepseek-main",
+        "provider": "deepseek",
+        "model": "deepseek-chat",
+        "base_url": "https://api.deepseek.com",
+        "api_key": "your-api-key"
+      }
+    ]
+  }
+}
+```
+
+### Authentication
+
+**API Key (OpenSource):**
+```json
+{
+  "auth": {
+    "provider": "api_key",
+    "api_key": {
+      "keys": {
+        "sk-your-key": {
+          "user_id": "admin",
+          "roles": ["admin"]
+        }
+      }
+    }
+  }
+}
+```
+
+**OIDC/OAuth2 (Enterprise):**
+```json
+{
+  "auth": {
+    "provider": "oidc",
+    "oidc": {
+      "issuer": "https://auth.company.com",
+      "client_id": "your-client-id",
+      "client_secret": "your-client-secret"
+    }
+  }
+}
+```
+
+---
 
 ## Troubleshooting
 
-### Port Conflicts
+### Container Won't Start
 
-If port 8000 is in use, modify `docker-compose.yml`:
+```bash
+# Check logs
+docker compose logs atlasclaw
+
+# Verify config syntax
+docker run --rm -v /opt/atlasclaw/config/atlasclaw.json:/app/atlasclaw.json:ro your-registry.com/atlasclaw:latest python -c "import json; json.load(open('/app/atlasclaw.json'))"
+```
+
+### Database Connection Failed (Enterprise)
+
+```bash
+# Check MySQL container
+docker compose ps mysql
+docker compose logs mysql
+
+# Test MySQL connection
+docker compose exec mysql mysql -u atlasclaw -p -e "SELECT 1"
+```
+
+### Port Already in Use
+
+Edit `docker-compose.yml` to change the port mapping:
 
 ```yaml
 ports:
-  - "8080:8000"
+  - "8080:8000"  # Change 8080 to your preferred port
 ```
 
-### Permission Issues
+### Permission Denied
 
-Ensure proper permissions:
+Ensure proper file permissions:
 
 ```bash
-chmod 600 config/atlasclaw.json
-chmod 600 secrets/*.txt
+chmod 600 /opt/atlasclaw/config/atlasclaw.json
+chown -R $(id -u):$(id -g) /opt/atlasclaw/data
 ```
 
-### Build Failures
+---
 
-Check Docker daemon is running:
+## Support
 
-```bash
-docker info
-```
-
-Clear Docker build cache if needed:
-
-```bash
-docker builder prune
-```
+For technical support, contact your AtlasClaw representative or refer to the full documentation at [docs link].

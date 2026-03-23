@@ -1,6 +1,9 @@
 #!/bin/bash
-# AtlasClaw Enterprise Build Script
-# This script automates the build process for AtlasClaw enterprise deployment
+# AtlasClaw Build Script
+# Usage: ./build.sh --mode opensource|enterprise [--tag VERSION] [--repo REGISTRY]
+#
+# Note: Image push functionality will be added in future versions.
+#       The --repo parameter specifies the target registry for images.
 
 set -e
 
@@ -8,23 +11,20 @@ set -e
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
-# Configuration
+# Default values
+MODE=""
+TAG="latest"
+REPO=""  # Docker registry repository (e.g., registry.example.com/atlasclaw)
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
-IMAGE_NAME="atlasclaw-enterprise"
-IMAGE_TAG="${1:-latest}"
 BUILD_DIR="$SCRIPT_DIR"
-
-echo -e "${GREEN}========================================${NC}"
-echo -e "${GREEN}  AtlasClaw Enterprise Build Script${NC}"
-echo -e "${GREEN}========================================${NC}"
-echo ""
+PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 
 # Function to print status
 print_status() {
-    echo -e "${YELLOW}[INFO]${NC} $1"
+    echo -e "${BLUE}[INFO]${NC} $1"
 }
 
 print_success() {
@@ -34,6 +34,113 @@ print_success() {
 print_error() {
     echo -e "${RED}[ERROR]${NC} $1"
 }
+
+print_warning() {
+    echo -e "${YELLOW}[WARNING]${NC} $1"
+}
+
+# Function to show usage
+show_usage() {
+    cat << EOF
+AtlasClaw Build Script
+
+Usage:
+    ./build.sh --mode opensource|enterprise [--tag VERSION] [--repo REGISTRY]
+
+Options:
+    --mode          Build mode: opensource or enterprise
+    --tag, -t       Image version tag (default: latest)
+    --repo, -r      Docker registry repository (e.g., registry.example.com/atlasclaw)
+                    If specified, images will be tagged for this registry.
+    --help, -h      Show this help message
+
+Examples:
+    ./build.sh --mode opensource
+    ./build.sh --mode enterprise --tag v1.0.0
+    ./build.sh --mode opensource --tag latest --repo registry.example.com/atlasclaw
+
+Modes:
+    opensource  - Lightweight build with SQLite (single node)
+    enterprise  - Full build with MySQL 8.5 (production)
+
+Registry:
+    When --repo is specified, images are tagged as:
+    - {repo}/atlasclaw:{tag}          (OpenSource edition)
+    - {repo}/atlasclaw-official:{tag} (Enterprise edition)
+
+    Note: Push functionality will be added in future versions.
+EOF
+}
+
+# Parse arguments
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --mode)
+            MODE="$2"
+            shift 2
+            ;;
+        --tag|-t)
+            TAG="$2"
+            shift 2
+            ;;
+        --repo|-r)
+            REPO="$2"
+            shift 2
+            ;;
+        --help|-h)
+            show_usage
+            exit 0
+            ;;
+        *)
+            print_error "Unknown option: $1"
+            show_usage
+            exit 1
+            ;;
+    esac
+done
+
+# Validate mode
+if [[ -z "$MODE" ]]; then
+    print_error "Mode is required. Use --mode opensource or --mode enterprise"
+    show_usage
+    exit 1
+fi
+
+if [[ "$MODE" != "opensource" && "$MODE" != "enterprise" ]]; then
+    print_error "Invalid mode: $MODE. Must be 'opensource' or 'enterprise'"
+    exit 1
+fi
+
+# Set mode-specific variables
+if [[ "$MODE" == "opensource" ]]; then
+    BASE_IMAGE_NAME="atlasclaw"
+    DOCKERFILE="Dockerfile.opensource"
+    COMPOSE_FILE="docker-compose.opensource.yml"
+    DB_TYPE="sqlite"
+else
+    BASE_IMAGE_NAME="atlasclaw-official"
+    DOCKERFILE="Dockerfile.enterprise"
+    COMPOSE_FILE="docker-compose.enterprise.yml"
+    DB_TYPE="mysql"
+fi
+
+# Add repo prefix if specified
+if [[ -n "$REPO" ]]; then
+    IMAGE_NAME="${REPO}/${BASE_IMAGE_NAME}"
+else
+    IMAGE_NAME="$BASE_IMAGE_NAME"
+fi
+
+echo ""
+echo -e "${GREEN}========================================${NC}"
+echo -e "${GREEN}  AtlasClaw Build Script${NC}"
+echo -e "${GREEN}========================================${NC}"
+echo ""
+print_status "Build Mode:    $MODE"
+print_status "Image Name:    $IMAGE_NAME"
+print_status "Version Tag:   $TAG"
+print_status "Database:      $DB_TYPE"
+echo ""
 
 # Step 1: Check prerequisites
 print_status "Checking prerequisites..."
@@ -48,89 +155,95 @@ if ! command -v docker-compose &> /dev/null; then
     exit 1
 fi
 
-if ! command -v python &> /dev/null && ! command -v python3 &> /dev/null; then
-    print_error "Python is not installed. Please install Python 3.11+ first."
-    exit 1
-fi
-
 print_success "Prerequisites check passed"
 echo ""
 
 # Step 2: Prepare build environment
 print_status "Preparing build environment..."
 
+cd "$BUILD_DIR"
+
 # Create necessary directories
 mkdir -p "$BUILD_DIR/config"
-mkdir -p "$BUILD_DIR/secrets"
 mkdir -p "$BUILD_DIR/data"
 mkdir -p "$BUILD_DIR/logs"
-mkdir -p "$BUILD_DIR/mysql-data"
+
+if [[ "$MODE" == "enterprise" ]]; then
+    mkdir -p "$BUILD_DIR/secrets"
+    mkdir -p "$BUILD_DIR/mysql-data"
+fi
 
 print_success "Build directories created"
 echo ""
 
-# Step 3: Install Python dependencies locally (for validation)
-print_status "Installing Python dependencies for validation..."
+# Step 3: Validate Python dependencies
+print_status "Validating Python dependencies..."
 
-cd "$PROJECT_ROOT"
-
-# Create virtual environment if not exists
+# Create virtual environment for validation
 if [ ! -d "$BUILD_DIR/.venv" ]; then
     python3 -m venv "$BUILD_DIR/.venv"
 fi
 
 source "$BUILD_DIR/.venv/bin/activate"
+pip install --upgrade pip -q
+pip install -r "$PROJECT_ROOT/requirements.txt" -q
 
-# Upgrade pip
-pip install --upgrade pip
+deactivate
 
-# Install dependencies
-pip install -r requirements.txt
-
-print_success "Python dependencies installed"
+print_success "Python dependencies validated"
 echo ""
 
-# Step 4: Generate default configuration
-print_status "Generating service configuration..."
+# Step 4: Generate configuration
+print_status "Generating configuration..."
 
-# Generate random passwords if not exist
-if [ ! -f "$BUILD_DIR/secrets/mysql_root_password.txt" ]; then
-    openssl rand -base64 32 > "$BUILD_DIR/secrets/mysql_root_password.txt"
-    print_status "Generated MySQL root password"
+# Generate passwords for enterprise mode
+if [[ "$MODE" == "enterprise" ]]; then
+    if [ ! -f "$BUILD_DIR/secrets/mysql_root_password.txt" ]; then
+        openssl rand -base64 32 > "$BUILD_DIR/secrets/mysql_root_password.txt"
+        chmod 600 "$BUILD_DIR/secrets/mysql_root_password.txt"
+        print_status "Generated MySQL root password"
+    fi
+
+    if [ ! -f "$BUILD_DIR/secrets/mysql_password.txt" ]; then
+        openssl rand -base64 32 > "$BUILD_DIR/secrets/mysql_password.txt"
+        chmod 600 "$BUILD_DIR/secrets/mysql_password.txt"
+        print_status "Generated MySQL user password"
+    fi
 fi
-
-if [ ! -f "$BUILD_DIR/secrets/mysql_password.txt" ]; then
-    openssl rand -base64 32 > "$BUILD_DIR/secrets/mysql_password.txt"
-    print_status "Generated MySQL user password"
-fi
-
-# Set proper permissions
-chmod 600 "$BUILD_DIR/secrets/"*.txt
 
 # Generate atlasclaw.json if not exists
 if [ ! -f "$BUILD_DIR/config/atlasclaw.json" ]; then
-    MYSQL_PASSWORD=$(cat "$BUILD_DIR/secrets/mysql_password.txt")
+    if [[ "$MODE" == "enterprise" ]]; then
+        MYSQL_PASSWORD=$(cat "$BUILD_DIR/secrets/mysql_password.txt")
+        DB_CONFIG='{
+      "type": "mysql",
+      "mysql": {
+        "host": "mysql",
+        "port": 3306,
+        "database": "atlasclaw",
+        "user": "atlasclaw",
+        "password": "'$MYSQL_PASSWORD'",
+        "charset": "utf8mb4"
+      },
+      "pool_size": 20,
+      "max_overflow": 30
+    }'
+    else
+        DB_CONFIG='{
+      "type": "sqlite",
+      "sqlite": {
+        "path": "./data/atlasclaw.db"
+      }
+    }'
+    fi
 
     cat > "$BUILD_DIR/config/atlasclaw.json" << EOF
 {
-  "_comment": "AtlasClaw Enterprise Configuration - Auto-generated by build script",
+  "_comment": "AtlasClaw Configuration - Auto-generated by build script",
   "workspace": {
     "path": "./data"
   },
-  "database": {
-    "type": "mysql",
-    "mysql": {
-      "host": "mysql",
-      "port": 3306,
-      "database": "atlasclaw",
-      "user": "atlasclaw",
-      "password": "$MYSQL_PASSWORD",
-      "charset": "utf8mb4"
-    },
-    "pool_size": 20,
-    "max_overflow": 30,
-    "echo": false
-  },
+  "database": $DB_CONFIG,
   "model": {
     "primary": "deepseek-main",
     "fallbacks": [],
@@ -178,15 +291,14 @@ if [ ! -f "$BUILD_DIR/config/atlasclaw.json" ]; then
 EOF
 
     chmod 600 "$BUILD_DIR/config/atlasclaw.json"
-    print_status "Generated default atlasclaw.json configuration"
-    print_status "${YELLOW}IMPORTANT: Please edit $BUILD_DIR/config/atlasclaw.json to configure your LLM API key${NC}"
+    print_status "Generated config/atlasclaw.json"
 fi
 
-print_success "Service configuration completed"
+print_success "Configuration completed"
 echo ""
 
 # Step 5: Copy required files to build directory
-print_status "Copying project files to build directory..."
+print_status "Copying project files..."
 
 cp "$PROJECT_ROOT/requirements.txt" "$BUILD_DIR/"
 cp -r "$PROJECT_ROOT/app" "$BUILD_DIR/"
@@ -202,20 +314,21 @@ print_status "Building Docker image..."
 cd "$BUILD_DIR"
 
 docker build \
+    -f "$DOCKERFILE" \
     --build-arg BUILD_DATE=$(date -u +'%Y-%m-%dT%H:%M:%SZ') \
-    --build-arg VERSION="$IMAGE_TAG" \
-    -t "$IMAGE_NAME:$IMAGE_TAG" \
+    --build-arg VERSION="$TAG" \
+    -t "$IMAGE_NAME:$TAG" \
     -t "$IMAGE_NAME:latest" \
     .
 
-print_success "Docker image built: $IMAGE_NAME:$IMAGE_TAG"
+print_success "Docker image built: $IMAGE_NAME:$TAG"
 echo ""
 
 # Step 7: Verify image
 print_status "Verifying Docker image..."
 
-if docker image inspect "$IMAGE_NAME:$IMAGE_TAG" > /dev/null 2>&1; then
-    IMAGE_SIZE=$(docker images --format "{{.Size}}" "$IMAGE_NAME:$IMAGE_TAG")
+if docker image inspect "$IMAGE_NAME:$TAG" > /dev/null 2>&1; then
+    IMAGE_SIZE=$(docker images --format "{{.Size}}" "$IMAGE_NAME:$TAG")
     print_success "Image verified (Size: $IMAGE_SIZE)"
 else
     print_error "Image verification failed"
@@ -225,7 +338,7 @@ fi
 echo ""
 
 # Step 8: Clean up build artifacts
-print_status "Cleaning up build artifacts..."
+print_status "Cleaning up temporary files..."
 
 rm -rf "$BUILD_DIR/app"
 rm -rf "$BUILD_DIR/migrations"
@@ -236,17 +349,29 @@ rm -rf "$BUILD_DIR/.venv"
 print_success "Cleanup completed"
 echo ""
 
+# Create symlink to compose file for convenience
+ln -sf "$COMPOSE_FILE" "$BUILD_DIR/docker-compose.yml"
+
 # Summary
 echo -e "${GREEN}========================================${NC}"
 echo -e "${GREEN}  Build Completed Successfully!${NC}"
 echo -e "${GREEN}========================================${NC}"
 echo ""
-echo "Image: $IMAGE_NAME:$IMAGE_TAG"
-echo "Configuration: $BUILD_DIR/config/atlasclaw.json"
-echo "Secrets: $BUILD_DIR/secrets/"
+echo "Build Mode:     $MODE"
+echo "Image:          $IMAGE_NAME:$TAG"
+echo "Configuration:  $BUILD_DIR/config/atlasclaw.json"
+echo "Compose File:   $BUILD_DIR/$COMPOSE_FILE"
+if [[ "$MODE" == "enterprise" ]]; then
+    echo "Secrets:        $BUILD_DIR/secrets/"
+fi
 echo ""
 echo "Next steps:"
 echo "  1. Edit $BUILD_DIR/config/atlasclaw.json to add your LLM API key"
+if [[ "$MODE" == "enterprise" ]]; then
+    echo "  2. Review MySQL passwords in $BUILD_DIR/secrets/"
+fi
 echo "  2. Run: cd $BUILD_DIR && docker-compose up -d"
-echo "  3. Run: docker-compose exec atlasclaw alembic upgrade head"
+if [[ "$MODE" == "enterprise" ]]; then
+    echo "  3. Run: docker-compose exec atlasclaw alembic upgrade head"
+fi
 echo ""

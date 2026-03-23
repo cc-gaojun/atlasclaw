@@ -41,7 +41,7 @@ services:
       - mysql_root_password
       - mysql_password
     volumes:
-      - ./mysql-data:/var/lib/mysql
+      - mysql-data:/var/lib/mysql
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "--password_file=/run/secrets/mysql_root_password"]
