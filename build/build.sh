@@ -1,6 +1,6 @@
 #!/bin/bash
 # AtlasClaw Build Script
-# Usage: ./build.sh --mode opensource|enterprise [--username USER] [--password PASS]
+# Usage: ./build.sh --mode opensource|enterprise --tag TAG [--username USER] [--password PASS]
 #
 # Fixed registry: registry.cn-shanghai.aliyuncs.com/atlasclaw
 
@@ -16,13 +16,13 @@ NC='\033[0m' # No Color
 # Fixed configuration (no user override)
 REGISTRY="registry.cn-shanghai.aliyuncs.com"
 NAMESPACE="atlasclaw"
-TAG="v0.6.1"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BUILD_DIR="$SCRIPT_DIR"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 
 # Parse arguments
 MODE=""
+TAG=""
 USERNAME=""
 PASSWORD=""
 
@@ -30,6 +30,10 @@ while [[ $# -gt 0 ]]; do
     case $1 in
         --mode)
             MODE="$2"
+            shift 2
+            ;;
+        --tag)
+            TAG="$2"
             shift 2
             ;;
         --username|-u)
@@ -75,20 +79,21 @@ show_usage() {
 AtlasClaw Build Script
 
 Usage:
-    ./build.sh --mode opensource|enterprise [--username USER] [--password PASS]
+    ./build.sh --mode opensource|enterprise --tag TAG [--username USER] [--password PASS]
 
 Options:
     --mode          Build mode: opensource or enterprise (required)
+    --tag           Image version tag, e.g., v0.6.3 (required)
     --username, -u  Registry username (required for push)
     --password, -p  Registry password (required for push)
     --help, -h      Show this help message
 
 Examples:
-    # Build opensource and push
-    ./build.sh --mode opensource --username myuser --password mypass
+    # Build opensource with specific tag and push
+    ./build.sh --mode opensource --tag v0.6.3 --username myuser --password mypass
 
-    # Build enterprise and push
-    ./build.sh --mode enterprise --username myuser --password mypass
+    # Build enterprise with specific tag and push
+    ./build.sh --mode enterprise --tag v0.6.3 --username myuser --password mypass
 
 Modes:
     opensource  - Lightweight build with SQLite (image: atlasclaw)
@@ -96,13 +101,18 @@ Modes:
 
 Registry:
     Fixed: registry.cn-shanghai.aliyuncs.com/atlasclaw
-    Tag: ${TAG}
 EOF
 }
 
 # Validate required parameters
 if [[ -z "$MODE" ]]; then
     print_error "Mode is required. Use --mode opensource or --mode enterprise"
+    show_usage
+    exit 1
+fi
+
+if [[ -z "$TAG" ]]; then
+    print_error "Tag is required. Use --tag <version>, e.g., --tag v0.6.3"
     show_usage
     exit 1
 fi
