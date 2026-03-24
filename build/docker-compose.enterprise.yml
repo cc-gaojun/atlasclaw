@@ -8,8 +8,8 @@ services:
       - "8000:8000"
     volumes:
       - ./config/atlasclaw.json:/app/atlasclaw.json:ro
+      - ./workspace:/opt/atlasclaw/workspace
       - ./data:/opt/atlasclaw/data
-      - ./logs:/app/logs
     depends_on:
       mysql:
         condition: service_healthy

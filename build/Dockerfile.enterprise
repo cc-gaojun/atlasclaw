@@ -1,7 +1,7 @@
 # AtlasClaw Enterprise Edition
 # Multi-stage build for production deployment with MySQL support
 
-FROM python:3.11-slim as builder
+FROM python:3.11 as builder
 
 WORKDIR /build
 
@@ -16,13 +16,16 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir --user -r requirements.txt
 
 # Production stage
-FROM python:3.11-slim
+FROM python:3.11
 
 WORKDIR /app
 
-# Install runtime dependencies (Python + Node.js for skills)
+# Install runtime dependencies (curl, wget, and Node.js for skills)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
+    wget \
+    ca-certificates \
+    gnupg \
     libpq5 \
     && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
     && apt-get install -y nodejs \
@@ -40,7 +43,8 @@ COPY migrations/ ./migrations/
 COPY alembic.ini .
 
 # Create necessary directories
-RUN mkdir -p /opt/atlasclaw/data /app/logs /app/config
+RUN mkdir -p /opt/atlasclaw/workspace /opt/atlasclaw/data /opt/atlasclaw/workspace/logs /app/config && \
+    ln -sf /opt/atlasclaw/workspace/logs /app/logs
 
 # Copy default config
 COPY config/atlasclaw.json /app/atlasclaw.json
