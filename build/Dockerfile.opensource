@@ -1,7 +1,7 @@
 # AtlasClaw OpenSource Edition
 # Lightweight build with SQLite for single-node deployment
 
-FROM python:3.11
+FROM python:3.11-slim
 
 # Prevent interactive prompts during package installation
 ENV DEBIAN_FRONTEND=noninteractive
@@ -27,12 +27,15 @@ COPY app/ ./app/
 COPY migrations/ ./migrations/
 COPY alembic.ini .
 
-# Create necessary directories
-RUN mkdir -p /opt/atlasclaw/workspace /opt/atlasclaw/data /opt/atlasclaw/workspace/logs /app/config && \
-    ln -sf /opt/atlasclaw/workspace/logs /app/logs
+# Create necessary directories (all under /app in container)
+# - /app/workspace: user data, config, logs
+# - /app/data: database files
+# - /app/extensions: custom providers, skills, channels
+RUN mkdir -p /app/workspace /app/data /app/workspace/logs \
+    /app/extensions/providers /app/extensions/skills /app/extensions/channels
 
-# Copy default config
-COPY config/atlasclaw.json /app/atlasclaw.json
+# Copy default config to workspace
+COPY config/atlasclaw.json /app/workspace/atlasclaw.json
 
 # Expose port
 EXPOSE 8000

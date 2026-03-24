@@ -2,14 +2,19 @@ version: '3.8'
 
 services:
   atlasclaw:
-    image: atlasclaw-official:latest
+    image: registry.cn-shanghai.aliyuncs.com/atlasclaw/atlasclaw-official:latest
     container_name: atlasclaw
     ports:
       - "8000:8000"
     volumes:
-      - ./config/atlasclaw.json:/app/atlasclaw.json:ro
-      - ./workspace:/opt/atlasclaw/workspace
-      - ./data:/opt/atlasclaw/data
+      # Workspace: host /opt/atlasclaw/workspace -> container /app/workspace
+      - /opt/atlasclaw/workspace:/app/workspace
+      # Data: host /opt/atlasclaw/data -> container /app/data
+      - /opt/atlasclaw/data:/app/data
+      # Extensions: host /opt/atlasclaw/extensions -> container /app/extensions
+      - /opt/atlasclaw/extensions/providers:/app/extensions/providers
+      - /opt/atlasclaw/extensions/skills:/app/extensions/skills
+      - /opt/atlasclaw/extensions/channels:/app/extensions/channels
     depends_on:
       mysql:
         condition: service_healthy
