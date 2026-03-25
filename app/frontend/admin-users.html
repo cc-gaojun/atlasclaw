@@ -1,0 +1,613 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>User Management - AtlasClaw</title>
+  <link rel="stylesheet" href="/styles/main.css?v=10">
+  <style>
+    /* Admin Users Page Specific Styles */
+    .admin-page {
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+      background: #f5f5f5;
+    }
+
+    .admin-header {
+      padding: 16px 24px;
+      border-bottom: 1px solid #e5e5e5;
+      background: white;
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+
+    .admin-header h1 {
+      font-size: 18px;
+      color: #333;
+      font-weight: 600;
+      margin: 0;
+      flex: 1;
+    }
+
+    .admin-content {
+      flex: 1;
+      overflow-y: auto;
+      padding: 24px;
+    }
+
+    /* Toolbar */
+    .toolbar {
+      display: flex;
+      gap: 12px;
+      margin-bottom: 20px;
+      flex-wrap: wrap;
+    }
+
+    .search-input {
+      flex: 1;
+      min-width: 200px;
+      max-width: 400px;
+      padding: 10px 14px;
+      border: 1px solid #ddd;
+      border-radius: 8px;
+      font-size: 14px;
+      transition: all 0.2s;
+    }
+
+    .search-input:focus {
+      outline: none;
+      border-color: #4b6cb7;
+      box-shadow: 0 0 0 3px rgba(75, 108, 183, 0.1);
+    }
+
+    /* User Table */
+    .users-section {
+      background: white;
+      border-radius: 12px;
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+      overflow: hidden;
+    }
+
+    .users-table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+
+    .users-table th,
+    .users-table td {
+      padding: 14px 16px;
+      text-align: left;
+      border-bottom: 1px solid #eee;
+    }
+
+    .users-table th {
+      background: #f9f9f9;
+      font-weight: 600;
+      font-size: 13px;
+      color: #666;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .users-table td {
+      font-size: 14px;
+      color: #333;
+    }
+
+    .users-table tbody tr:hover {
+      background: #f8f9ff;
+    }
+
+    .users-table tbody tr:last-child td {
+      border-bottom: none;
+    }
+
+    /* Status Badge */
+    .badge {
+      display: inline-block;
+      padding: 4px 10px;
+      border-radius: 12px;
+      font-size: 12px;
+      font-weight: 500;
+    }
+
+    .badge-active {
+      background: #e6f7ed;
+      color: #27ae60;
+    }
+
+    .badge-inactive {
+      background: #f0f0f0;
+      color: #888;
+    }
+
+    .badge-admin {
+      background: #fff3e0;
+      color: #e67e22;
+    }
+
+    .badge-local {
+      background: #e3f2fd;
+      color: #2196f3;
+    }
+
+    .badge-sso {
+      background: #f3e5f5;
+      color: #9c27b0;
+    }
+
+    /* Action Buttons */
+    .action-btns {
+      display: flex;
+      gap: 8px;
+    }
+
+    .btn-icon {
+      width: 32px;
+      height: 32px;
+      border: 1px solid #ddd;
+      border-radius: 6px;
+      background: white;
+      color: #666;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.2s;
+    }
+
+    .btn-icon:hover {
+      border-color: #bbb;
+      color: #333;
+    }
+
+    .btn-icon.btn-delete:hover {
+      border-color: #e74c3c;
+      color: #e74c3c;
+      background: #fff5f5;
+    }
+
+    .btn-icon svg {
+      width: 16px;
+      height: 16px;
+    }
+
+    /* Pagination */
+    .pagination {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 16px;
+      border-top: 1px solid #eee;
+      background: #fafafa;
+    }
+
+    .pagination-info {
+      font-size: 13px;
+      color: #666;
+    }
+
+    .pagination-btns {
+      display: flex;
+      gap: 8px;
+    }
+
+    .pagination-btn {
+      padding: 8px 14px;
+      border: 1px solid #ddd;
+      border-radius: 6px;
+      background: white;
+      color: #333;
+      font-size: 13px;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .pagination-btn:hover:not(:disabled) {
+      border-color: #4b6cb7;
+      color: #4b6cb7;
+    }
+
+    .pagination-btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    .pagination-btn.active {
+      background: #4b6cb7;
+      border-color: #4b6cb7;
+      color: white;
+    }
+
+    /* Empty State */
+    .empty-state {
+      text-align: center;
+      padding: 60px 20px;
+      color: #888;
+    }
+
+    .empty-state svg {
+      width: 64px;
+      height: 64px;
+      margin-bottom: 16px;
+      opacity: 0.5;
+    }
+
+    .empty-state p {
+      font-size: 14px;
+    }
+
+    /* Modal */
+    .modal-overlay {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0, 0, 0, 0.5);
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      z-index: 1000;
+    }
+
+    .modal-overlay.hidden {
+      display: none;
+    }
+
+    .modal {
+      background: white;
+      border-radius: 12px;
+      width: 90%;
+      max-width: 500px;
+      max-height: 90vh;
+      overflow-y: auto;
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.2);
+    }
+
+    .modal-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 20px 24px;
+      border-bottom: 1px solid #eee;
+    }
+
+    .modal-header h2 {
+      font-size: 18px;
+      font-weight: 600;
+      color: #333;
+      margin: 0;
+    }
+
+    .modal-close {
+      background: none;
+      border: none;
+      font-size: 24px;
+      color: #888;
+      cursor: pointer;
+      padding: 0;
+      line-height: 1;
+    }
+
+    .modal-close:hover {
+      color: #333;
+    }
+
+    .modal-body {
+      padding: 24px;
+    }
+
+    .modal-footer {
+      display: flex;
+      justify-content: flex-end;
+      gap: 12px;
+      padding: 16px 24px;
+      border-top: 1px solid #eee;
+      background: #fafafa;
+    }
+
+    /* Form Elements */
+    .form-row {
+      margin-bottom: 20px;
+    }
+
+    .form-row:last-child {
+      margin-bottom: 0;
+    }
+
+    .form-row label {
+      display: block;
+      margin-bottom: 8px;
+      font-size: 14px;
+      font-weight: 500;
+      color: #333;
+    }
+
+    .form-row input,
+    .form-row select {
+      width: 100%;
+      padding: 10px 14px;
+      border: 1px solid #ddd;
+      border-radius: 8px;
+      font-size: 14px;
+      transition: all 0.2s;
+    }
+
+    .form-row input:focus,
+    .form-row select:focus {
+      outline: none;
+      border-color: #4b6cb7;
+      box-shadow: 0 0 0 3px rgba(75, 108, 183, 0.1);
+    }
+
+    .form-row .hint {
+      display: block;
+      margin-top: 6px;
+      font-size: 12px;
+      color: #888;
+    }
+
+    .form-row .required {
+      color: #e74c3c;
+    }
+
+    .form-row-inline {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .form-row-inline input[type="checkbox"] {
+      width: auto;
+    }
+
+    .form-row-inline label {
+      margin-bottom: 0;
+      font-weight: normal;
+    }
+
+    /* Delete Confirm Modal */
+    .confirm-message {
+      font-size: 14px;
+      color: #666;
+      line-height: 1.6;
+    }
+
+    .confirm-message strong {
+      color: #333;
+    }
+
+    .btn-danger {
+      padding: 10px 20px;
+      background: #e74c3c;
+      color: white;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 14px;
+      font-weight: 500;
+      transition: all 0.2s;
+    }
+
+    .btn-danger:hover {
+      background: #c0392b;
+    }
+
+    /* Toast Notifications - Top Right */
+    .toast-container {
+      position: fixed;
+      top: 20px;
+      right: 20px;
+      z-index: 1001;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .toast-item {
+      padding: 12px 20px;
+      border-radius: 8px;
+      font-size: 14px;
+      color: white;
+      background: #333;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+      animation: slideIn 0.3s ease;
+    }
+
+    .toast-item.success {
+      background: #27ae60;
+    }
+
+    .toast-item.error {
+      background: #e74c3c;
+    }
+
+    @keyframes slideIn {
+      from {
+        transform: translateX(100%);
+        opacity: 0;
+      }
+      to {
+        transform: translateX(0);
+        opacity: 1;
+      }
+    }
+
+    /* Loading State */
+    .loading-row td {
+      text-align: center;
+      padding: 40px 20px;
+      color: #888;
+    }
+
+    /* Responsive */
+    @media (max-width: 768px) {
+      .users-table {
+        display: block;
+        overflow-x: auto;
+      }
+
+      .toolbar {
+        flex-direction: column;
+      }
+
+      .search-input {
+        max-width: none;
+      }
+    }
+  </style>
+</head>
+<body class="admin-page">
+  <!-- Header -->
+  <header class="admin-header">
+    <a href="/" class="btn-secondary" style="padding: 8px 14px;">
+      <span>← Home</span>
+    </a>
+    <h1>User Management</h1>
+    <button id="logoutBtn" class="logout-btn" type="button" title="Logout" aria-label="Logout">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
+        <polyline points="16 17 21 12 16 7"></polyline>
+        <line x1="21" y1="12" x2="9" y2="12"></line>
+      </svg>
+    </button>
+  </header>
+
+  <!-- Main Content -->
+  <main class="admin-content">
+    <!-- Toolbar -->
+    <div class="toolbar">
+      <input type="text" id="searchInput" class="search-input" placeholder="Search users...">
+      <button id="createUserBtn" class="btn-primary">
+        <span>+ Create User</span>
+      </button>
+    </div>
+
+    <!-- Users Table Section -->
+    <section class="users-section">
+      <table class="users-table">
+        <thead>
+          <tr>
+            <th>Username</th>
+            <th>Display Name</th>
+            <th>Email</th>
+            <th>Auth Type</th>
+            <th>Status</th>
+            <th>Admin</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody id="usersTableBody">
+          <tr class="loading-row">
+            <td colspan="7">Loading users...</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <!-- Pagination -->
+      <div class="pagination">
+        <div class="pagination-info" id="paginationInfo">
+          Showing 0 of 0 users
+        </div>
+        <div class="pagination-btns" id="paginationBtns">
+          <!-- Pagination buttons rendered dynamically -->
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- Create/Edit User Modal -->
+  <div id="userModal" class="modal-overlay hidden">
+    <div class="modal">
+      <div class="modal-header">
+        <h2 id="modalTitle">Create User</h2>
+        <button class="modal-close" id="modalClose">&times;</button>
+      </div>
+      <div class="modal-body">
+        <form id="userForm">
+          <input type="hidden" id="editUserId" value="">
+          
+          <div class="form-row">
+            <label for="formUsername">Username <span class="required">*</span></label>
+            <input type="text" id="formUsername" name="username" required autocomplete="off">
+          </div>
+
+          <div class="form-row">
+            <label for="formDisplayName">Display Name</label>
+            <input type="text" id="formDisplayName" name="display_name" autocomplete="off">
+          </div>
+
+          <div class="form-row">
+            <label for="formEmail">Email</label>
+            <input type="email" id="formEmail" name="email" autocomplete="off">
+          </div>
+
+          <div class="form-row">
+            <label for="formPassword">Password <span id="passwordRequired" class="required">*</span></label>
+            <input type="password" id="formPassword" name="password" autocomplete="new-password">
+            <span class="hint" id="passwordHint">Leave empty to keep current password (edit mode only)</span>
+          </div>
+
+          <div class="form-row">
+            <label for="formAuthType">Auth Type</label>
+            <select id="formAuthType" name="auth_type">
+              <option value="local">Local</option>
+              <option value="sso">SSO</option>
+            </select>
+          </div>
+
+          <div class="form-row">
+            <label for="formRoles">Roles</label>
+            <input type="text" id="formRoles" name="roles" placeholder="user, viewer (comma separated)">
+            <span class="hint">Comma separated role names</span>
+          </div>
+
+          <div class="form-row form-row-inline">
+            <input type="checkbox" id="formIsActive" name="is_active" checked>
+            <label for="formIsActive">Active</label>
+          </div>
+
+          <div class="form-row form-row-inline">
+            <input type="checkbox" id="formIsAdmin" name="is_admin">
+            <label for="formIsAdmin">Administrator</label>
+          </div>
+        </form>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn-secondary" id="modalCancel">Cancel</button>
+        <button type="submit" class="btn-primary" id="modalSubmit" form="userForm">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Delete Confirm Modal -->
+  <div id="deleteModal" class="modal-overlay hidden">
+    <div class="modal" style="max-width: 400px;">
+      <div class="modal-header">
+        <h2>Confirm Delete</h2>
+        <button class="modal-close" id="deleteModalClose">&times;</button>
+      </div>
+      <div class="modal-body">
+        <p class="confirm-message">
+          Are you sure you want to delete user <strong id="deleteUserName"></strong>?
+          This action cannot be undone.
+        </p>
+        <input type="hidden" id="deleteUserId" value="">
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn-secondary" id="deleteCancel">Cancel</button>
+        <button type="button" class="btn-danger" id="deleteConfirm">Delete</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast Container -->
+  <div id="toastContainer" class="toast-container"></div>
+
+  <!-- Scripts -->
+  <script type="module" src="/scripts/admin-users.js"></script>
+</body>
+</html>

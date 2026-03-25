@@ -184,6 +184,14 @@ class UserCreate(UserBase):
 
     password: Optional[str] = Field(default=None, min_length=1, description="Password (will be hashed)")
 
+    @field_validator("password")
+    @classmethod
+    def validate_password_strength(cls, v):
+        """Validate password meets minimum strength requirements."""
+        if v and len(v) < 8:
+            raise ValueError("Password must be at least 8 characters")
+        return v
+
 
 class UserUpdate(BaseModel):
     """Schema for updating an existing User."""
@@ -195,6 +203,7 @@ class UserUpdate(BaseModel):
     auth_type: Optional[str] = Field(default=None, max_length=100)
     is_active: Optional[bool] = None
     is_admin: Optional[bool] = None
+    avatar_url: Optional[str] = Field(default=None, max_length=500)
 
 
 
@@ -215,6 +224,21 @@ class UserListResponse(BaseModel):
 
     users: List[UserResponse]
     total: int
+
+
+class ProfileUpdate(BaseModel):
+    """Schema for user self-service profile update."""
+
+    display_name: Optional[str] = Field(None, max_length=200)
+    email: Optional[str] = Field(None, max_length=255)
+    avatar_url: Optional[str] = Field(None, max_length=500)
+
+
+class PasswordChange(BaseModel):
+    """Schema for user password change."""
+
+    current_password: str
+    new_password: str = Field(min_length=8)
 
 
 # ============== Channel Schemas ==============

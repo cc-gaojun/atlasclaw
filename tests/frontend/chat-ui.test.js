@@ -3,7 +3,7 @@
  */
 
 jest.mock('../../app/frontend/scripts/config.js', () => ({
-    buildApiUrl: (path) => `http://127.0.0.1:8000${path}`
+    buildApiUrl: (path) => path.startsWith('/') ? path : `/${path}`
 }));
 
 jest.mock('../../app/frontend/scripts/i18n.js', () => ({
@@ -115,7 +115,8 @@ describe('chat-ui.js', () => {
         });
 
         expect(MockEventSource.instances).toHaveLength(1);
-        expect(MockEventSource.instances[0].url).toBe('http://127.0.0.1:8000/api/agent/runs/run-123/stream');
+        // URL is relative path since buildApiUrl returns relative paths
+        expect(MockEventSource.instances[0].url).toBe('/api/agent/runs/run-123/stream');
         expect(response).toEqual({ text: '' });
     });
 

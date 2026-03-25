@@ -395,6 +395,10 @@ async def _load_agent_config_from_db(session, agent_id: str):
 
 async def _ensure_default_local_admin(config) -> None:
     """Ensure default local admin account exists when local auth is enabled."""
+    import logging
+
+    logger = logging.getLogger(__name__)
+
     from app.atlasclaw.auth.config import AuthConfig
     from app.atlasclaw.db.orm.user import UserService
     from app.atlasclaw.db.schemas import UserCreate
@@ -408,6 +412,15 @@ async def _ensure_default_local_admin(config) -> None:
 
     username = auth_cfg.local.default_admin_username or "admin"
     password = auth_cfg.local.default_admin_password or "admin"
+
+    # Validate password meets minimum length requirement
+    if password and len(password) < 8:
+        logger.warning(
+            "Default admin password is shorter than 8 characters. "
+            "Please update auth.local.default_admin_password in your configuration. "
+            "Using minimum-length fallback."
+        )
+        password = "Admin@123"
 
     async with get_db_manager().get_session() as session:
         existing = await UserService.get_by_username(session, username)
@@ -862,6 +875,14 @@ def create_app() -> FastAPI:
             if login_path.exists():
                 return FileResponse(str(login_path))
             return {"error": "Login page not found"}
+
+        # Serve admin users page
+        @app.get("/admin/users", include_in_schema=False)
+        async def serve_admin_users():
+            admin_users_path = frontend_dir / "admin-users.html"
+            if admin_users_path.exists():
+                return FileResponse(str(admin_users_path))
+            return {"error": "Admin users page not found"}
         
         # Serve config.json
 
