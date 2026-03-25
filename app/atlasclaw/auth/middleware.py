@@ -16,6 +16,7 @@ from app.atlasclaw.auth.config import AuthConfig
 from app.atlasclaw.auth.jwt_token import verify_atlas_token
 from app.atlasclaw.auth.models import ANONYMOUS_USER, AuthenticationError, UserInfo
 from app.atlasclaw.auth.strategy import AuthStrategy
+from app.atlasclaw.session.context import SessionKey
 
 logger = logging.getLogger(__name__)
 
@@ -86,8 +87,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
             request.state.user_info = ANONYMOUS_USER
             return await call_next(request)
 
-        provider_name = self._current_provider_name()
-
+        provider_name = self._strategy.provider.provider_name()
 
         if provider_name == "none":
             try:
@@ -96,7 +96,8 @@ class AuthMiddleware(BaseHTTPMiddleware):
                 request.state.user_info = ANONYMOUS_USER
             return await call_next(request)
 
-        if provider_name in {"local", "oidc"}:
+        # JWT-based authentication for local, oidc, and dingtalk_oidc providers
+        if provider_name in {"local", "oidc", "dingtalk_oidc"}:
             atlas_token = self._extract_atlas_token(request)
             if not atlas_token:
                 return self._auth_failed_response(request)
@@ -114,6 +115,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
 
             jwt_user_info = self._build_user_info_from_payload(payload, atlas_token)
 
+            # OCBC (OIDC Cookie Binding Check) for standard OIDC provider
             if provider_name == "oidc" and self._ocbc_enabled:
                 oidc_token = self._extract_oidc_token(request)
                 if not oidc_token:
@@ -138,6 +140,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
             request.state.user_info = jwt_user_info
             return await call_next(request)
 
+        # Other providers (smartcmp, api_key, etc.): extract and validate credential
         credential = self._extract_provider_credential(request)
         if not credential:
             return self._auth_failed_response(request)
@@ -168,16 +171,11 @@ class AuthMiddleware(BaseHTTPMiddleware):
             auth_type=auth_type,
         )
 
-    def _current_provider_name(self) -> str:
-        provider = self._strategy.primary_provider
-        return provider.provider_name() if provider is not None else "none"
-
     def _auth_failed_response(self, request: Request):
-
         if request.url.path == "/" or self._is_browser_request(request):
-            provider_name = self._current_provider_name()
-
-            if provider_name == "oidc" and self._oidc_redirect_uri:
+            provider_name = self._strategy.provider.provider_name()
+            # Redirect to SSO login for OIDC-based providers
+            if provider_name in {"oidc", "dingtalk_oidc"} and self._oidc_redirect_uri:
                 return RedirectResponse(url="/api/auth/login", status_code=302)
 
             original = f"{request.url.path}"
@@ -259,8 +257,7 @@ def setup_auth_middleware(
 
         _store = shadow_store or ShadowUserStore()
         _provider = NoneProvider(default_user_id="anonymous")
-        strategy = AuthStrategy(providers=[_provider], shadow_store=_store, cache_ttl_seconds=0)
-
+        strategy = AuthStrategy(provider=_provider, shadow_store=_store, cache_ttl_seconds=0)
         app.add_middleware(AuthMiddleware, strategy=strategy, auth_config=None, anonymous_fallback=True)
         logger.info("AuthMiddleware: anonymous fallback mode (no auth config)")
         return
@@ -274,24 +271,24 @@ def setup_auth_middleware(
         app.add_middleware(
             AuthMiddleware,
             strategy=AuthStrategy(
-                providers=[
-                    __import__(
-                        "app.atlasclaw.auth.providers.none", fromlist=["NoneProvider"]
-                    ).NoneProvider()
-                ],
+                provider=__import__(
+                    "app.atlasclaw.auth.providers.none", fromlist=["NoneProvider"]
+                ).NoneProvider(),
                 shadow_store=__import__(
                     "app.atlasclaw.auth.shadow_store", fromlist=["ShadowUserStore"]
                 ).ShadowUserStore(),
             ),
-
             auth_config=None,
             anonymous_fallback=True,
         )
         return
 
+    # Set redirect_uri for OIDC-based providers (standard OIDC and DingTalk OIDC)
     oidc_redirect_uri = ""
     if auth_config.provider.lower() == "oidc":
         oidc_redirect_uri = auth_config.oidc.expanded().redirect_uri
+    elif auth_config.provider.lower() == "dingtalk_oidc":
+        oidc_redirect_uri = auth_config.dingtalk_oidc.expanded().redirect_uri
 
     app.add_middleware(
         AuthMiddleware,
