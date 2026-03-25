@@ -418,6 +418,13 @@ async def _execute_agent_run(
                 )
             elif event.type == "error":
                 ctx.sse_manager.push_error(run_id, event.error)
+            elif event.type == "thinking":
+                ctx.sse_manager.push_thinking(
+                    run_id,
+                    event.phase,
+                    event.content,
+                    metadata=event.metadata if event.metadata else None
+                )
         
         # Update run status
         if run_id in ctx.active_runs:

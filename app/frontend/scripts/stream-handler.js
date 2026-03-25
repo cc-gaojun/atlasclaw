@@ -19,6 +19,7 @@ export const EventTypes = {
     LIFECYCLE: 'lifecycle',
     ASSISTANT: 'assistant',
     TOOL: 'tool',
+    THINKING: 'thinking',
     ERROR: 'error',
     HEARTBEAT: 'heartbeat'
 };
@@ -38,6 +39,9 @@ export function createStreamHandler(runId, callbacks = {}) {
         onDelta = () => {},
         onToolStart = () => {},
         onToolEnd = () => {},
+        onThinkingStart = () => {},
+        onThinkingDelta = () => {},
+        onThinkingEnd = () => {},
         onEnd = () => {},
         onError = () => {}
     } = callbacks;
@@ -102,6 +106,19 @@ export function createStreamHandler(runId, callbacks = {}) {
 
         eventSource.addEventListener(EventTypes.HEARTBEAT, () => {
             console.log('[Stream] Heartbeat received');
+        });
+
+        eventSource.addEventListener(EventTypes.THINKING, (e) => {
+            const data = parseEventData(e.data);
+            console.log('[Stream] Thinking event:', data);
+            // Backend sends { phase: 'start' | 'delta' | 'end', content?: string, elapsed?: number }
+            if (data.phase === 'start') {
+                onThinkingStart();
+            } else if (data.phase === 'delta') {
+                onThinkingDelta({ content: data.content });
+            } else if (data.phase === 'end') {
+                onThinkingEnd({ elapsed: data.elapsed || 0 });
+            }
         });
     }
 
