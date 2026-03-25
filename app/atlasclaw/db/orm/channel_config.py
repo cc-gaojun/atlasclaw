@@ -10,10 +10,35 @@ from typing import Any, Dict, List, Optional
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.atlasclaw.core.encryption import encrypt_json, decrypt_json, FORMAT_PREFIX
 from app.atlasclaw.db.models import ChannelModel
 from app.atlasclaw.db.schemas import ChannelCreate, ChannelUpdate
 
 logger = logging.getLogger(__name__)
+
+
+def _is_encrypted(config: Any) -> bool:
+    """Check if config is already encrypted (string with prefix)."""
+    return isinstance(config, str) and config.startswith(FORMAT_PREFIX)
+
+
+def _encrypt_config(config: dict[str, Any]) -> str:
+    """Encrypt config dict to encrypted string."""
+    if config is None:
+        return "{}"
+    return encrypt_json(config)
+
+
+def _decrypt_config(config: Any) -> dict[str, Any]:
+    """Decrypt config from encrypted string or return as-is."""
+    if config is None:
+        return {}
+    if isinstance(config, str) and config.startswith(FORMAT_PREFIX):
+        return decrypt_json(config)
+    # Legacy: plain dict stored as JSON
+    if isinstance(config, dict):
+        return config
+    return {}
 
 
 class ChannelConfigService:
@@ -34,7 +59,7 @@ class ChannelConfigService:
             user_id=channel_data.user_id,
             name=channel_data.name,
             type=channel_data.type,
-            config=channel_data.config,
+            config=_encrypt_config(channel_data.config),
             is_active=channel_data.is_active,
             is_default=channel_data.is_default,
         )
@@ -204,6 +229,11 @@ class ChannelConfigService:
             return None
 
         update_data = channel_data.model_dump(exclude_unset=True)
+        
+        # Encrypt config if provided
+        if "config" in update_data and update_data["config"] is not None:
+            update_data["config"] = _encrypt_config(update_data["config"])
+        
         for key, value in update_data.items():
             setattr(channel, key, value)
 
@@ -283,18 +313,23 @@ class ChannelConfigService:
     @staticmethod
     def to_channel_config(channel: ChannelModel) -> Dict[str, Any]:
         """Convert Channel model to config format for runtime use.
+        
+        Automatically decrypts config field for API response.
 
         Args:
             channel: Channel model
 
         Returns:
-            Channel config dict
+            Channel config dict with decrypted config
         """
+        # Decrypt config for API response
+        config = _decrypt_config(channel.config)
+        
         return {
             "id": channel.id,
             "name": channel.name,
             "channel_type": channel.type,
-            "config": channel.config or {},
+            "config": config,
             "enabled": channel.is_active,
             "is_default": channel.is_default,
             "user_id": channel.user_id,

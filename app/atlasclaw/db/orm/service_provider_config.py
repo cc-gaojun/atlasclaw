@@ -10,10 +10,35 @@ from typing import Any, Optional
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.atlasclaw.core.encryption import encrypt_json, decrypt_json, FORMAT_PREFIX
 from app.atlasclaw.db.models import ServiceProviderConfigModel
 from app.atlasclaw.db.schemas import ServiceProviderConfigCreate, ServiceProviderConfigUpdate
 
 logger = logging.getLogger(__name__)
+
+
+def _is_encrypted(config: Any) -> bool:
+    """Check if config is already encrypted (string with prefix)."""
+    return isinstance(config, str) and config.startswith(FORMAT_PREFIX)
+
+
+def _encrypt_config(config: dict[str, Any]) -> str:
+    """Encrypt config dict to encrypted string."""
+    if config is None:
+        return "{}"
+    return encrypt_json(config)
+
+
+def _decrypt_config(config: Any) -> dict[str, Any]:
+    """Decrypt config from encrypted string or return as-is."""
+    if config is None:
+        return {}
+    if isinstance(config, str) and config.startswith(FORMAT_PREFIX):
+        return decrypt_json(config)
+    # Legacy: plain dict stored as JSON
+    if isinstance(config, dict):
+        return config
+    return {}
 
 
 class ServiceProviderConfigService:
@@ -27,7 +52,7 @@ class ServiceProviderConfigService:
         item = ServiceProviderConfigModel(
             provider_type=provider_data.provider_type,
             instance_name=provider_data.instance_name,
-            config=provider_data.config,
+            config=_encrypt_config(provider_data.config),
             is_active=provider_data.is_active,
         )
         session.add(item)
@@ -104,7 +129,7 @@ class ServiceProviderConfigService:
         nested: dict[str, dict[str, dict[str, Any]]] = {}
         for row in rows:
             provider_bucket = nested.setdefault(row.provider_type, {})
-            provider_bucket[row.instance_name] = dict(row.config or {})
+            provider_bucket[row.instance_name] = _decrypt_config(row.config)
 
         return nested
 
@@ -119,6 +144,11 @@ class ServiceProviderConfigService:
             return None
 
         update_data = provider_data.model_dump(exclude_unset=True)
+        
+        # Encrypt config if provided
+        if "config" in update_data and update_data["config"] is not None:
+            update_data["config"] = _encrypt_config(update_data["config"])
+        
         for key, value in update_data.items():
             setattr(item, key, value)
 

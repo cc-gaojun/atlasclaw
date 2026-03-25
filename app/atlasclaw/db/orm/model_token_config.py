@@ -15,52 +15,80 @@ from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.atlasclaw.core.encryption import encrypt, decrypt, FORMAT_PREFIX
 from app.atlasclaw.db.models import TokenModel
 from app.atlasclaw.db.schemas import TokenCreate, TokenUpdate
 
 logger = logging.getLogger(__name__)
 
-# Encryption key from environment or generate a default (for development only)
-_ENCRYPTION_KEY = os.environ.get("ATLASCLAW_ENCRYPTION_KEY", "atlasclaw-default-encryption-key-change-in-production")
+# LEGACY: Old Fernet-based encryption for backward compatibility
+# Will be removed in future version after all data is migrated
+_LEGACY_ENCRYPTION_KEY = os.environ.get("ATLASCLAW_ENCRYPTION_KEY")
 
 
-def _get_fernet() -> Fernet:
-    """Get Fernet instance for encryption/decryption."""
-    # Derive a key from the password
+def _get_fernet() -> Fernet | None:
+    """Get Fernet instance for legacy decryption (backward compatibility).
+    
+    Returns None if legacy key is not available.
+    """
+    if not _LEGACY_ENCRYPTION_KEY:
+        return None
+    
     kdf = PBKDF2HMAC(
         algorithm=hashes.SHA256(),
         length=32,
-        salt=b"atlasclaw-salt",  # Fixed salt for deterministic key derivation
+        salt=b"atlasclaw-salt",
         iterations=100000,
     )
-    key = base64.urlsafe_b64encode(kdf.derive(_ENCRYPTION_KEY.encode()))
+    key = base64.urlsafe_b64encode(kdf.derive(_LEGACY_ENCRYPTION_KEY.encode()))
     return Fernet(key)
 
 
+def _is_legacy_format(encrypted_key: str) -> bool:
+    """Check if encrypted key uses legacy Fernet format.
+    
+    Legacy format: base64(Fernet ciphertext)
+    New format: v1:base64(nonce+ciphertext+tag)
+    """
+    return not encrypted_key.startswith(FORMAT_PREFIX)
+
+
 def encrypt_api_key(api_key: str) -> str:
-    """Encrypt an API key.
+    """Encrypt an API key using AES-256-GCM.
 
     Args:
         api_key: Plain text API key
 
     Returns:
-        Encrypted API key string
+        Encrypted API key string in format: v1:base64(nonce+ciphertext+tag)
     """
-    fernet = _get_fernet()
-    return fernet.encrypt(api_key.encode()).decode()
+    return encrypt(api_key)
 
 
 def decrypt_api_key(encrypted_key: str) -> str:
-    """Decrypt an API key.
+    """Decrypt an API key (supports both legacy and new format).
 
     Args:
         encrypted_key: Encrypted API key string
 
     Returns:
         Plain text API key
+
+    Raises:
+        EncryptionError: If decryption fails
     """
-    fernet = _get_fernet()
-    return fernet.decrypt(encrypted_key.encode()).decode()
+    # Check if it's legacy Fernet format
+    if _is_legacy_format(encrypted_key):
+        logger.debug("Detected legacy Fernet format, decrypting with backward compatibility")
+        fernet = _get_fernet()
+        if fernet is None:
+            raise ValueError(
+                "Cannot decrypt legacy Fernet format: ATLASCLAW_ENCRYPTION_KEY not set"
+            )
+        return fernet.decrypt(encrypted_key.encode()).decode()
+    
+    # New AES-256-GCM format
+    return decrypt(encrypted_key)
 
 
 def mask_api_key(api_key: str) -> str:
