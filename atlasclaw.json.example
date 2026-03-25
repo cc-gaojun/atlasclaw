@@ -28,7 +28,7 @@
   "channels_root": "../atlasclaw-providers/channels",
 
   "model": {
-    "_comment": "Token pool configuration for multi-token LLM access.",
+    "_comment": "Token pool configuration for multi-token LLM access. Set reasoning: true for models that support thinking/reasoning output.",
     "primary": "deepseek-main",
     "fallbacks": [],
     "temperature": 0.2,
@@ -43,6 +43,18 @@
         "api_type": "openai",
         "priority": 100,
         "weight": 100
+      },
+      {
+        "_comment": "Example reasoning model configuration. Enable reasoning: true for models with thinking output.",
+        "id": "deepseek-reasoner",
+        "provider": "deepseek",
+        "model": "deepseek-reasoner",
+        "base_url": "https://api.deepseek.com",
+        "api_key": "${DS_API_KEY}",
+        "api_type": "openai",
+        "reasoning": true,
+        "priority": 80,
+        "weight": 50
       }
     ]
   },

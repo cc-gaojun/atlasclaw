@@ -191,6 +191,13 @@ deep-chat::part(container) {
     width: 100% !important;
 }
 
+/* Disable DeepChat default message bubble animation for faster rendering */
+deep-chat::part(message-bubble),
+deep-chat::part(outer-container) {
+    animation: none !important;
+    transition: none !important;
+}
+
 /* Confirm Dialog */
 .confirm-dialog {
     position: fixed;
@@ -916,4 +923,269 @@ deep-chat::part(container) {
     border-radius: 12px;
     padding: 24px;
     box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+}
+
+/* ===== Thinking Animation System (DeepSeek Minimal Style) ===== */
+
+/* Loading dots animation - subtle bounce */
+@keyframes thinking-dot-minimal {
+    0%, 100% { 
+        opacity: 0.4; 
+        transform: translateY(0);
+    }
+    50% { 
+        opacity: 0.8; 
+        transform: translateY(-3px);
+    }
+}
+
+.thinking-loading {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 0;
+}
+
+.thinking-loading .dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: #999;
+    animation: thinking-dot-minimal 1.2s ease-in-out infinite;
+}
+
+.thinking-loading .dot:nth-child(2) {
+    animation-delay: 0.15s;
+}
+
+.thinking-loading .dot:nth-child(3) {
+    animation-delay: 0.3s;
+}
+
+/* Subtle pulse for thinking icon */
+@keyframes thinking-pulse-minimal {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+}
+
+/* Animated ellipsis for thinking label */
+@keyframes dot-blink {
+    0%, 20% { opacity: 0; }
+    50% { opacity: 1; }
+    80%, 100% { opacity: 0; }
+}
+
+/* Thinking dots - animated ellipsis */
+.thinking-dots {
+    display: inline-flex;
+    margin-left: 2px;
+}
+
+.thinking-dots span {
+    animation: dot-blink 1.4s infinite;
+}
+
+.thinking-dots span:nth-child(1) {
+    animation-delay: 0s;
+}
+
+.thinking-dots span:nth-child(2) {
+    animation-delay: 0.2s;
+}
+
+.thinking-dots span:nth-child(3) {
+    animation-delay: 0.4s;
+}
+
+/* Thinking block - minimal style, no background/border/shadow */
+.thinking-block {
+    margin-bottom: 8px;
+}
+
+.thinking-block.thinking {
+    margin-bottom: 8px;
+    will-change: contents;
+}
+
+/* Header - inline, muted color */
+.thinking-header {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 0;
+    cursor: pointer;
+    user-select: none;
+    color: #8b8b8b;
+    font-size: 14px;
+    transition: color 0.2s ease;
+}
+
+.thinking-header:hover {
+    color: #666;
+}
+
+/* Icon - small and refined */
+.thinking-icon {
+    font-size: 14px;
+    line-height: 1;
+    display: inline-flex;
+    align-items: center;
+}
+
+/* Icon pulse animation during thinking */
+.thinking-block.thinking .thinking-icon {
+    animation: thinking-pulse-minimal 1.5s ease-in-out infinite;
+}
+
+/* Label text */
+.thinking-label {
+    font-size: 14px;
+    font-weight: 400;
+}
+
+/* Timer */
+.thinking-timer {
+    font-size: 14px;
+    font-variant-numeric: tabular-nums;
+}
+
+/* Toggle arrow */
+.thinking-toggle {
+    font-size: 12px;
+    transition: transform 0.15s ease;
+    display: inline-flex;
+}
+
+.thinking-block.open .thinking-toggle {
+    transform: rotate(90deg);
+}
+
+/* Body - minimal, indented */
+.thinking-body {
+    max-height: 0;
+    overflow: hidden;
+    transition: max-height 0.15s ease, opacity 0.1s ease;
+    opacity: 0;
+    padding-left: 20px;
+    font-size: 14px;
+    line-height: 1.6;
+    color: #8b8b8b;
+}
+
+.thinking-block.open .thinking-body {
+    max-height: 60vh;
+    opacity: 1;
+    padding: 8px 0 8px 20px;
+    overflow-y: auto;
+}
+
+/* Thinking in-progress state - always expanded */
+.thinking-block.thinking .thinking-body {
+    max-height: 50vh;
+    opacity: 1;
+    padding: 8px 0 8px 20px;
+    overflow-y: auto;
+}
+
+/* Thinking content text format */
+.thinking-content-text {
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+/* Response content container */
+.response-content {
+    margin-top: 8px;
+    font-size: 15px;
+    line-height: 1.6;
+    color: #333;
+}
+
+/* Message wrapper - ensures proper DOM structure */
+.message-wrapper {
+    width: 100%;
+}
+
+.message-wrapper .response-content {
+    margin-top: 8px;
+    line-height: 1.6;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+}
+
+/* Simple loading for non-reasoning models */
+.simple-loading {
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 0;
+    color: #888;
+    font-size: 18px;
+    letter-spacing: 2px;
+}
+
+.simple-loading::after {
+    content: '·';
+    animation: simple-dots-cycle 1.2s steps(1) infinite;
+}
+
+@keyframes simple-dots-cycle {
+    0%, 100% { content: '·'; }
+    33% { content: '··'; }
+    66% { content: '···'; }
+}
+
+/* ===== Details-based Thinking Block (Completed State - Minimal) ===== */
+
+/* Details element - minimal styling */
+details.thinking-block {
+    margin-bottom: 8px;
+}
+
+/* Summary element (header) - minimal styling */
+details.thinking-block > summary {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 0;
+    cursor: pointer;
+    user-select: none;
+    color: #8b8b8b;
+    font-size: 14px;
+    transition: color 0.2s ease;
+    list-style: none;
+}
+
+/* Hide native details marker in different browsers */
+details.thinking-block > summary::-webkit-details-marker {
+    display: none;
+}
+
+details.thinking-block > summary::marker {
+    display: none;
+}
+
+details.thinking-block > summary:hover {
+    color: #666;
+}
+
+/* Toggle arrow for details */
+details.thinking-block .thinking-toggle {
+    font-size: 12px;
+    transition: transform 0.15s ease;
+    display: inline-flex;
+}
+
+details.thinking-block[open] .thinking-toggle {
+    transform: rotate(90deg);
+}
+
+/* Body styling - minimal, indented */
+details.thinking-block .thinking-body {
+    padding: 8px 0 8px 20px;
+    font-size: 14px;
+    line-height: 1.6;
+    color: #8b8b8b;
+    max-height: 60vh;
+    overflow-y: auto;
+    opacity: 1;
 }

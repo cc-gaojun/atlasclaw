@@ -32,6 +32,8 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.requests import Request
 
 from app.atlasclaw.api.routes import create_router, APIContext, install_request_validation_logging, set_api_context
 from app.atlasclaw.api.webhook_dispatch import WebhookDispatchManager
@@ -817,6 +819,20 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
     install_request_validation_logging(app)
+    
+    # Add Cache-Control middleware for static files
+    # This ensures browsers always revalidate with server using ETag/Last-Modified
+    # Returns 304 if unchanged, new content if changed
+    class StaticFileCacheMiddleware(BaseHTTPMiddleware):
+        async def dispatch(self, request: Request, call_next):
+            response = await call_next(request)
+            # Add no-cache header for static resource paths
+            path = request.url.path
+            if path.startswith(("/static/", "/scripts/", "/styles/", "/locales/")):
+                response.headers["Cache-Control"] = "no-cache"
+            return response
+    
+    app.add_middleware(StaticFileCacheMiddleware)
     
     # Mount static files for frontend
     frontend_dir = Path(__file__).parent.parent / "frontend"
