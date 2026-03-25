@@ -564,7 +564,10 @@ class TestChannelConfigService:
         )
         
         assert updated is not None
-        assert updated.config["port"] == 9090
+        # Config is encrypted in DB, need to decrypt for verification
+        from app.atlasclaw.db.orm.channel_config import _decrypt_config
+        decrypted_config = _decrypt_config(updated.config)
+        assert decrypted_config["port"] == 9090
         assert updated.is_active is False
 
     @pytest.mark.asyncio

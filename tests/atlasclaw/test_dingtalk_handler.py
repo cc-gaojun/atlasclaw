@@ -63,6 +63,7 @@ class TestDingTalkHandler:
         """Test config validation with valid client_id."""
         handler = DingTalkHandler()
         config = {
+            "connection_mode": "stream",
             "client_id": "test_client_id",
             "client_secret": "test_client_secret",
         }
@@ -75,6 +76,7 @@ class TestDingTalkHandler:
         """Test config validation with valid webhook_url."""
         handler = DingTalkHandler()
         config = {
+            "connection_mode": "webhook",
             "webhook_url": "https://oapi.dingtalk.com/robot/send?access_token=xxx",
         }
         result = await handler.validate_config(config)
@@ -85,17 +87,18 @@ class TestDingTalkHandler:
     async def test_validate_config_missing_all(self):
         """Test config validation fails when missing both webhook_url and client_id."""
         handler = DingTalkHandler()
-        config = {}
+        config = {"connection_mode": "webhook"}
         result = await handler.validate_config(config)
         assert result.valid is False
         assert len(result.errors) > 0
-        assert "Either webhook_url or client_id/app_key is required" in result.errors[0]
+        assert "webhook_url is required" in result.errors[0]
 
     @pytest.mark.asyncio
     async def test_validate_config_missing_client_secret(self):
         """Test config validation fails when client_id provided without client_secret."""
         handler = DingTalkHandler()
         config = {
+            "connection_mode": "stream",
             "client_id": "test_client_id",
         }
         result = await handler.validate_config(config)

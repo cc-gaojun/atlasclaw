@@ -119,11 +119,11 @@ class TestFeishuHandler:
         
         assert schema["type"] == "object"
         assert "properties" in schema
+        assert "connection_mode" in schema["properties"]
         assert "app_id" in schema["properties"]
         assert "app_secret" in schema["properties"]
-        assert "required" in schema
-        assert "app_id" in schema["required"]
-        assert "app_secret" in schema["required"]
+        assert "webhook_url" in schema["properties"]
+        assert "required_by_mode" in schema
 
     @pytest.mark.asyncio
     async def test_start_sets_connecting_status(self):

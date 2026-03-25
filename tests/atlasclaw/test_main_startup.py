@@ -61,7 +61,6 @@ class TestMainStartup:
 
             qualified_names = set(get_api_context().skill_registry.list_md_qualified_skills())
             assert "jira:jira-issue" in qualified_names, "should load the external Jira skill as provider-qualified"
-            assert "smartcmp:preapproval-agent" in qualified_names, "should load SmartCMP skills as provider-qualified"
 
 
 

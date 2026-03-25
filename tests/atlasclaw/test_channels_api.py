@@ -7,6 +7,7 @@ import tempfile
 from pathlib import Path
 
 import pytest
+import pytest_asyncio
 from fastapi.testclient import TestClient
 from fastapi import FastAPI
 
@@ -14,6 +15,8 @@ from app.atlasclaw.api.channels import router, set_channel_manager
 from app.atlasclaw.channels import ChannelRegistry
 from app.atlasclaw.channels.handlers import WebSocketHandler
 from app.atlasclaw.channels.manager import ChannelManager
+from app.atlasclaw.db import init_database
+from app.atlasclaw.db.database import DatabaseConfig
 
 
 @pytest.fixture
@@ -28,6 +31,20 @@ def app():
 def temp_workspace():
     """Create temporary workspace directory."""
     return tempfile.mkdtemp()
+
+
+@pytest_asyncio.fixture
+async def initialized_db(temp_workspace):
+    """Initialize database for testing."""
+    db_path = Path(temp_workspace) / "test.db"
+    config = DatabaseConfig(
+        db_type="sqlite",
+        sqlite_path=str(db_path),
+    )
+    db_manager = await init_database(config)
+    await db_manager.create_tables()
+    yield
+    # Cleanup is handled by temp_workspace fixture
 
 
 @pytest.fixture
@@ -49,8 +66,8 @@ def channel_manager(temp_workspace):
 
 
 @pytest.fixture
-def client(app, channel_manager):
-    """Create test client."""
+def client(app, channel_manager, initialized_db):
+    """Create test client with initialized database."""
     return TestClient(app)
 
 

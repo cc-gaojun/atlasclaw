@@ -16,7 +16,8 @@ from fastapi.testclient import TestClient
 
 from app.atlasclaw.auth.models import AuthResult, UserInfo, ANONYMOUS_USER, AuthenticationError
 from app.atlasclaw.auth.middleware import setup_auth_middleware, AuthMiddleware
-from app.atlasclaw.auth.config import AuthConfig, SmartCMPAuthConfig
+from app.atlasclaw.auth.config import AuthConfig
+
 from app.atlasclaw.auth.strategy import AuthStrategy
 from app.atlasclaw.auth.shadow_store import ShadowUserStore
 

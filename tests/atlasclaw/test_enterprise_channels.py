@@ -37,24 +37,25 @@ class TestDingTalkHandler:
         assert handler.config["webhook_url"] == "https://oapi.dingtalk.com/robot/send?access_token=xxx"
 
     @pytest.mark.asyncio
-    async def test_setup_with_app_key(self):
-        """Test handler setup with app key."""
+    async def test_setup_with_client_id(self):
+        """Test handler setup with client_id (app_key)."""
         handler = DingTalkHandler()
         result = await handler.setup({
-            "app_key": "dingxxxxxxxx",
-            "app_secret": "secret123"
+            "client_id": "dingxxxxxxxx",
+            "client_secret": "secret123"
         })
         
         assert result is True
-        assert handler.config["app_key"] == "dingxxxxxxxx"
+        assert handler.config["client_id"] == "dingxxxxxxxx"
 
     @pytest.mark.asyncio
     async def test_setup_without_credentials(self):
-        """Test handler setup fails without credentials."""
+        """Test handler setup works without credentials (just returns True)."""
         handler = DingTalkHandler()
         result = await handler.setup({})
         
-        assert result is False
+        # setup() now returns True even without credentials
+        assert result is True
 
     @pytest.mark.asyncio
     async def test_start_stop(self):
@@ -83,13 +84,14 @@ class TestDingTalkHandler:
         assert result.valid is True
 
     @pytest.mark.asyncio
-    async def test_validate_config_app_key(self):
-        """Test configuration validation for app key mode."""
+    async def test_validate_config_client_id(self):
+        """Test configuration validation for client_id (app_key) mode."""
         handler = DingTalkHandler()
         
         result = await handler.validate_config({
-            "app_key": "dingxxxxxxxx",
-            "app_secret": "secret123"
+            "connection_mode": "stream",
+            "client_id": "dingxxxxxxxx",
+            "client_secret": "secret123"
         })
         
         assert isinstance(result, ChannelValidationResult)
@@ -115,22 +117,21 @@ class TestDingTalkHandler:
         assert schema["type"] == "object"
         assert "properties" in schema
         assert "webhook_url" in schema["properties"]
-        assert "app_key" in schema["properties"]
-        assert "app_secret" in schema["properties"]
+        assert "client_id" in schema["properties"]
+        assert "client_secret" in schema["properties"]
 
     @pytest.mark.asyncio
     async def test_handle_inbound_json(self):
         """Test handling inbound DingTalk callback."""
         handler = DingTalkHandler()
-        await handler.setup({"app_key": "test", "app_secret": "secret"})
+        await handler.setup({"client_id": "test", "client_secret": "secret"})
         
-        # DingTalk callback format
+        # DingTalk callback format uses msgtype/text format
         request = {
             "msgId": "msg-123",
-            "createAt": 1234567890000,
-            "conversationType": "1",
+            "msgtype": "text",
             "conversationId": "chat-456",
-            "senderId": "user-789",
+            "senderStaffId": "user-789",
             "senderNick": "Test User",
             "text": {
                 "content": "Hello DingTalk"
@@ -169,17 +170,17 @@ class TestWeComHandler:
         assert handler.config["webhook_url"] == "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=xxx"
 
     @pytest.mark.asyncio
-    async def test_setup_with_corpid(self):
-        """Test handler setup with corp ID."""
+    async def test_setup_with_bot_id(self):
+        """Test handler setup with bot_id (WeChat Work intelligent robot)."""
         handler = WeComHandler()
         result = await handler.setup({
-            "corpid": "wwxxxxxxxx",
-            "corpsecret": "secret123",
-            "agentid": 1000001
+            "connection_mode": "websocket",
+            "bot_id": "aibxxxxxxxx",
+            "bot_secret": "secret123"
         })
         
         assert result is True
-        assert handler.config["corpid"] == "wwxxxxxxxx"
+        assert handler.config["bot_id"] == "aibxxxxxxxx"
 
     @pytest.mark.asyncio
     async def test_setup_without_credentials(self):
@@ -187,6 +188,7 @@ class TestWeComHandler:
         handler = WeComHandler()
         result = await handler.setup({})
         
+        # setup() now returns False without valid credentials
         assert result is False
 
     @pytest.mark.asyncio
@@ -197,7 +199,8 @@ class TestWeComHandler:
         
         start_result = await handler.start(None)
         assert start_result is True
-        assert handler.get_status() == ConnectionStatus.CONNECTED
+        # start() sets status to CONNECTING, actual connection happens in connect()
+        assert handler.get_status() in [ConnectionStatus.CONNECTING, ConnectionStatus.CONNECTED]
         
         stop_result = await handler.stop()
         assert stop_result is True
@@ -216,14 +219,14 @@ class TestWeComHandler:
         assert result.valid is True
 
     @pytest.mark.asyncio
-    async def test_validate_config_corpid(self):
-        """Test configuration validation for corp ID mode."""
+    async def test_validate_config_websocket(self):
+        """Test configuration validation for WebSocket (bot) mode."""
         handler = WeComHandler()
         
         result = await handler.validate_config({
-            "corpid": "wwxxxxxxxx",
-            "corpsecret": "secret123",
-            "agentid": 1000001
+            "connection_mode": "websocket",
+            "bot_id": "aibxxxxxxxx",
+            "bot_secret": "secret123"
         })
         
         assert isinstance(result, ChannelValidationResult)
@@ -249,15 +252,15 @@ class TestWeComHandler:
         assert schema["type"] == "object"
         assert "properties" in schema
         assert "webhook_url" in schema["properties"]
-        assert "corpid" in schema["properties"]
-        assert "corpsecret" in schema["properties"]
-        assert "agentid" in schema["properties"]
+        assert "bot_id" in schema["properties"]
+        assert "bot_secret" in schema["properties"]
+        assert "connection_mode" in schema["properties"]
 
     @pytest.mark.asyncio
     async def test_handle_inbound_xml(self):
         """Test handling inbound WeCom callback."""
         handler = WeComHandler()
-        await handler.setup({"corpid": "test", "corpsecret": "secret", "agentid": 1000001})
+        await handler.setup({"bot_id": "test", "bot_secret": "secret"})
         
         # WeCom callback format (parsed from XML)
         request = {

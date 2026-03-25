@@ -36,7 +36,7 @@ class TestAuthStrategy:
     async def test_full_auth_flow_creates_user_info(self, tmp_path):
         store = ShadowUserStore(store_path=str(tmp_path / "users.json"))
         provider = _MockProvider(subject="alice")
-        strategy = AuthStrategy(provider=provider, shadow_store=store, cache_ttl_seconds=60)
+        strategy = AuthStrategy(providers=[provider], shadow_store=store, cache_ttl_seconds=60)
 
         user_info = await strategy.resolve_user("token-alice")
 
@@ -49,7 +49,8 @@ class TestAuthStrategy:
         calls: list[str] = []
         store = ShadowUserStore(store_path=str(tmp_path / "users.json"))
         provider = _MockProvider(subject="bob", call_count=calls)
-        strategy = AuthStrategy(provider=provider, shadow_store=store, cache_ttl_seconds=60)
+        strategy = AuthStrategy(providers=[provider], shadow_store=store, cache_ttl_seconds=60)
+
 
         await strategy.resolve_user("token-bob")
         await strategy.resolve_user("token-bob")
@@ -63,7 +64,7 @@ class TestAuthStrategy:
         store = ShadowUserStore(store_path=str(tmp_path / "users.json"))
         provider = _MockProvider(subject="carol", call_count=calls)
         # TTL = 0 → every call is a cache miss
-        strategy = AuthStrategy(provider=provider, shadow_store=store, cache_ttl_seconds=0)
+        strategy = AuthStrategy(providers=[provider], shadow_store=store, cache_ttl_seconds=0)
 
         await strategy.resolve_user("token-carol")
         await strategy.resolve_user("token-carol")
@@ -75,7 +76,8 @@ class TestAuthStrategy:
         calls: list[str] = []
         store = ShadowUserStore(store_path=str(tmp_path / "users.json"))
         provider = _MockProvider(subject="dave", call_count=calls)
-        strategy = AuthStrategy(provider=provider, shadow_store=store, cache_ttl_seconds=60)
+        strategy = AuthStrategy(providers=[provider], shadow_store=store, cache_ttl_seconds=60)
+
 
         await strategy.resolve_user("token-A")
         await strategy.resolve_user("token-B")
