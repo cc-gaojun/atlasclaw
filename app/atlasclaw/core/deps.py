@@ -51,7 +51,8 @@ class SkillDeps:
         async def query_cloud_entries(ctx: RunContext[SkillDeps], cloud_type: str = None):
             deps = ctx.deps
             headers = {"CloudChef-Authenticate": deps.user_token}
-            async with httpx.AsyncClient() as client:
+            async with httpx.AsyncClient(trust_env=True) as client:
+
                 resp = await client.get("/v1/cloudEntries", headers=headers)
                 return resp.json()
 

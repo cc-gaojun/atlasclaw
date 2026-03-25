@@ -213,7 +213,8 @@ Text-to-speech synthesis
         start = time.monotonic()
         
         try:
-            async with httpx.AsyncClient() as client:
+            async with httpx.AsyncClient(trust_env=True) as client:
+
                 response = await client.post(
                     "https://api.openai.com/v1/audio/speech",
                     headers={
@@ -307,8 +308,9 @@ streamingText-to-speech synthesis
         """Stream audio chunks from the OpenAI speech API."""
         import httpx
         
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(trust_env=True) as client:
             async with client.stream(
+
                 "POST",
                 "https://api.openai.com/v1/audio/speech",
                 headers={

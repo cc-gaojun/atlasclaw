@@ -7,10 +7,12 @@ Fetches search engine HTML via `httpx` and parses the results.
 
 from __future__ import annotations
 
+import os
 import re
 import logging
 from typing import Optional, TYPE_CHECKING
-from urllib.parse import quote_plus
+from urllib.parse import quote_plus, urlsplit
+
 
 from app.atlasclaw.tools.base import ToolResult
 
@@ -24,7 +26,57 @@ logger = logging.getLogger(__name__)
 SEARCH_PROVIDERS = ["bing", "duckduckgo", "google"]
 
 
+def _provider_base_url(provider: str) -> str:
+    if provider == "bing":
+        return "https://www.bing.com"
+    if provider == "duckduckgo":
+        return "https://html.duckduckgo.com"
+    if provider == "google":
+        return "https://www.google.com"
+    return ""
+
+
+def _provider_request_url(provider: str, query: str, limit: int) -> str:
+    if provider == "bing":
+        return f"https://www.bing.com/search?q={quote_plus(query)}&count={limit}"
+    if provider == "duckduckgo":
+        return f"https://html.duckduckgo.com/html/?q={quote_plus(query)}"
+    if provider == "google":
+        return f"https://www.google.com/search?q={quote_plus(query)}&num={limit}"
+    return ""
+
+
+def _mask_proxy_url(proxy_url: str) -> str:
+    if not proxy_url:
+        return ""
+    try:
+        parsed = urlsplit(proxy_url)
+        host = parsed.hostname or ""
+        port = f":{parsed.port}" if parsed.port else ""
+        auth = "***@" if parsed.username or parsed.password else ""
+        return f"{parsed.scheme}://{auth}{host}{port}"
+    except Exception:
+        return "***"
+
+
+def _proxy_debug_info() -> dict[str, str]:
+    proxy_keys = [
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "http_proxy",
+        "https_proxy",
+        "NO_PROXY",
+        "no_proxy",
+    ]
+    return {
+        key: _mask_proxy_url(value) if "proxy" in key.lower() and key.lower() != "no_proxy" else value
+        for key in proxy_keys
+        if (value := os.getenv(key))
+    }
+
+
 async def web_search_tool(
+
     ctx: "RunContext[SkillDeps]",
     query: str,
     provider: Optional[str] = None,
@@ -81,15 +133,37 @@ search
                 },
             ).to_dict()
         except Exception as e:
-            last_error = f"{prov}: {e}"
-            logger.warning("Search Provider %s failed: %s", prov, e)
+            base_url = _provider_base_url(prov)
+            request_url = _provider_request_url(prov, query, limit)
+            proxy_info = _proxy_debug_info()
+            last_error = f"{prov}: {type(e).__name__}: {e!r}"
+            logger.warning(
+                "Search Provider request failed | provider=%s base_url=%s request_url=%s query=%r limit=%s proxy=%s error_type=%s error=%r",
+                prov,
+                base_url,
+                request_url,
+                query,
+                limit,
+                proxy_info,
+                type(e).__name__,
+                e,
+                exc_info=True,
+            )
             continue
+
 
     # Provider
     return ToolResult.error(
         f"All search Providers unavailable: {last_error}",
-        details={"provider": used_provider, "query": query, "count": 0},
+        details={
+            "provider": used_provider,
+            "base_url": _provider_base_url(used_provider),
+            "query": query,
+            "count": 0,
+            "proxy": _proxy_debug_info(),
+        },
     ).to_dict()
+
 
 
 async def _search_with_provider(
@@ -129,12 +203,13 @@ async def _search_bing(query: str, limit: int) -> list[dict]:
         "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
     }
 
-    async with httpx.AsyncClient(follow_redirects=True, timeout=15.0) as client:
+    async with httpx.AsyncClient(follow_redirects=True, timeout=15.0, trust_env=True) as client:
         resp = await client.get(url, headers=headers)
         resp.raise_for_status()
         html = resp.text
 
     return _parse_bing_results(html, limit)
+
 
 
 def _parse_bing_results(html: str, limit: int) -> list[dict]:
@@ -181,12 +256,13 @@ async def _search_duckduckgo(query: str, limit: int) -> list[dict]:
         ),
     }
 
-    async with httpx.AsyncClient(follow_redirects=True, timeout=15.0) as client:
+    async with httpx.AsyncClient(follow_redirects=True, timeout=15.0, trust_env=True) as client:
         resp = await client.get(url, headers=headers)
         resp.raise_for_status()
         html = resp.text
 
     return _parse_duckduckgo_results(html, limit)
+
 
 
 def _parse_duckduckgo_results(html: str, limit: int) -> list[dict]:
@@ -244,12 +320,13 @@ async def _search_google(query: str, limit: int) -> list[dict]:
         "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
     }
 
-    async with httpx.AsyncClient(follow_redirects=True, timeout=15.0) as client:
+    async with httpx.AsyncClient(follow_redirects=True, timeout=15.0, trust_env=True) as client:
         resp = await client.get(url, headers=headers)
         resp.raise_for_status()
         html = resp.text
 
     return _parse_google_results(html, limit)
+
 
 
 def _parse_google_results(html: str, limit: int) -> list[dict]:

@@ -178,7 +178,8 @@ class OpenAISTTProvider(MediaUnderstandingProvider):
                 )
             
             # Call the OpenAI transcription API.
-            async with httpx.AsyncClient() as client:
+            async with httpx.AsyncClient(trust_env=True) as client:
+
                 files = {"file": ("audio.mp3", file_data, content.mime_type)}
                 data = {"model": self.model}
                 if self.language:
@@ -263,7 +264,8 @@ class OpenAIVisionProvider(MediaUnderstandingProvider):
                 }
             
             # Call the OpenAI chat completions API for vision analysis.
-            async with httpx.AsyncClient() as client:
+            async with httpx.AsyncClient(trust_env=True) as client:
+
                 response = await client.post(
                     "https://api.openai.com/v1/chat/completions",
                     headers={

@@ -104,19 +104,6 @@
       "redirect_uri": "https://atlasclaw.example.com/api/auth/callback",
       "pkce_enabled": true,
       "pkce_method": "S256"
-    },
-
-    "api_key": {
-      "keys": {
-        "sk-dev-key-001": {
-          "user_id": "dev-user",
-          "roles": ["admin"]
-        }
-      }
-    },
-
-    "none": {
-      "default_user_id": "default"
     }
   },
 

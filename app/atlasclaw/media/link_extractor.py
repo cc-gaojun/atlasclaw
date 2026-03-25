@@ -216,7 +216,9 @@ URL content
             async with httpx.AsyncClient(
                 follow_redirects=self.config.follow_redirects,
                 timeout=self.config.timeout_seconds,
+                trust_env=True,
             ) as client:
+
                 response = await client.get(url)
                 
                 content_type = response.headers.get("content-type", "")
