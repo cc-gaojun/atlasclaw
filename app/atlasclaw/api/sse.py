@@ -27,6 +27,7 @@ class SSEEventType(Enum):
     COMPACTION = "compaction"
     ERROR = "error"
     HEARTBEAT = "heartbeat"
+    THINKING = "thinking"
 
 
 @dataclass
@@ -302,6 +303,10 @@ create SSE
             replay_events = self._get_missed_events(stream, last_event_id)
             for event in replay_events:
                 yield event.to_sse_format()
+                # Maintain streaming effect for thinking delta events during replay
+                if (event.event_type == SSEEventType.THINKING
+                        and event.data.get("phase") == "delta"):
+                    await asyncio.sleep(0.015)
 
             if was_closed_on_subscribe:
                 return
@@ -473,6 +478,34 @@ tool
             data["code"] = code
         return self.push_event(run_id, SSEEvent(
             event_type=SSEEventType.ERROR,
+            data=data
+        ))
+
+    def push_thinking(
+        self,
+        run_id: str,
+        phase: str,
+        content: str = "",
+        metadata: dict = None,
+    ) -> int:
+        """Push a thinking event.
+        
+        Args:
+            run_id: run ID
+            phase: phase (start/delta/end)
+            content: thinking content (for delta phase)
+            metadata: additional metadata (e.g., elapsed time for end phase)
+            
+        Returns:
+            number of notified subscribers
+        """
+        data: dict[str, Any] = {"phase": phase}
+        # Always include content field for frontend consistency
+        data["content"] = content
+        if metadata:
+            data.update(metadata)
+        return self.push_event(run_id, SSEEvent(
+            event_type=SSEEventType.THINKING,
             data=data
         ))
         

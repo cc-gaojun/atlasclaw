@@ -32,6 +32,7 @@ class StreamEventType(str, Enum):
     TOOL = "tool"
     ERROR = "error"
     COMPACTION = "compaction"
+    THINKING = "thinking"    # 思考/推理过程
 
 
 @dataclass
@@ -100,7 +101,22 @@ Streaming event
     def compaction_end(cls) -> "StreamEvent":
         """create"""
         return cls(type="compaction", phase="end")
-    
+
+    @classmethod
+    def thinking_start(cls) -> "StreamEvent":
+        """开始思考"""
+        return cls(type="thinking", phase="start")
+
+    @classmethod
+    def thinking_delta(cls, content: str) -> "StreamEvent":
+        """思考内容增量"""
+        return cls(type="thinking", phase="delta", content=content)
+
+    @classmethod
+    def thinking_end(cls, elapsed: float = 0) -> "StreamEvent":
+        """End thinking phase"""
+        return cls(type="thinking", phase="end", metadata={"elapsed": elapsed})
+
     def to_dict(self) -> dict:
         """Convert to a dictionary"""
         result = {"type": self.type}

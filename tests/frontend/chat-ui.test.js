@@ -1,5 +1,6 @@
 /**
  * chat-ui.js regression tests
+ * Tests for DeepChat handler mode implementation
  */
 
 jest.mock('../../app/frontend/scripts/config.js', () => ({
@@ -61,89 +62,226 @@ MockEventSource.instances = [];
 
 global.EventSource = MockEventSource;
 
-function createChatElement() {
+/**
+ * Create mock signals object for DeepChat handler
+ */
+function createMockSignals() {
     return {
-        addMessage: jest.fn()
+        onResponse: jest.fn(),
+        onClose: jest.fn(),
+        stopClicked: { listener: null }
     };
 }
 
-describe('chat-ui.js', () => {
-    test('requestInterceptor rewrites request body for /api/agent/run without sending its own fetch', async () => {
+/**
+ * Create a mock chat element for handler mode
+ */
+function createChatElement() {
+    return {
+        handler: null,
+        introMessage: null,
+        textInput: null
+    };
+}
+
+describe('chat-ui.js handler mode', () => {
+    test('initChat configures handler on element', async () => {
         const { initChat } = await import('../../app/frontend/scripts/chat-ui.js');
         const element = createChatElement();
+        
         global.fetch.mockResolvedValueOnce({
             ok: true,
             json: () => Promise.resolve({ session_key: 'session-123' })
+        }).mockResolvedValueOnce({
+            ok: true,
+            json: () => Promise.resolve({ welcome_message: 'Hello!' })
         });
 
         await initChat(element);
-        global.fetch.mockClear();
 
-        const request = {
-            body: {
-                messages: [{ text: 'hello' }]
-            }
-        };
-
-        const pendingRequest = element.requestInterceptor(request);
-
-        expect(global.fetch).not.toHaveBeenCalled();
-        const intercepted = await pendingRequest;
-
-        expect(intercepted.body).toEqual({
-            session_key: 'session-123',
-            message: 'hello',
-            timeout_seconds: 600
-        });
+        expect(typeof element.handler).toBe('function');
     });
 
-    test('responseInterceptor starts SSE after backend returns run_id', async () => {
+    test('handler calls API with correct body and starts SSE stream', async () => {
         const { initChat } = await import('../../app/frontend/scripts/chat-ui.js');
         const element = createChatElement();
+        const signals = createMockSignals();
+        
+        // Mock session init
         global.fetch.mockResolvedValueOnce({
             ok: true,
             json: () => Promise.resolve({ session_key: 'session-123' })
+        });
+        // Mock agent info
+        global.fetch.mockResolvedValueOnce({
+            ok: true,
+            json: () => Promise.resolve({})
         });
 
         await initChat(element);
         global.fetch.mockClear();
 
-        const response = await element.responseInterceptor({
-            run_id: 'run-123',
-            status: 'running',
-            session_key: 'session-123'
+        // Mock /api/agent/run response
+        global.fetch.mockResolvedValueOnce({
+            ok: true,
+            json: () => Promise.resolve({ run_id: 'run-123' })
         });
 
+        // Call handler with mock body
+        const handlerPromise = element.handler(
+            { messages: [{ text: 'hello', role: 'user' }] },
+            signals
+        );
+
+        // Wait for API call
+        await new Promise(r => setTimeout(r, 50));
+
+        // Verify API was called with correct body
+        expect(global.fetch).toHaveBeenCalledWith(
+            'http://127.0.0.1:8000/api/agent/run',
+            expect.objectContaining({
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    session_key: 'session-123',
+                    message: 'hello',
+                    timeout_seconds: 600
+                })
+            })
+        );
+
+        // Wait for SSE to be created
+        await new Promise(r => setTimeout(r, 100));
+
+        // Verify SSE stream started
         expect(MockEventSource.instances).toHaveLength(1);
         expect(MockEventSource.instances[0].url).toBe('http://127.0.0.1:8000/api/agent/runs/run-123/stream');
-        expect(response).toEqual({ text: '' });
+
+        // Verify loading dots were shown
+        expect(signals.onResponse).toHaveBeenCalledWith(
+            expect.objectContaining({ html: expect.stringContaining('thinking-loading') })
+        );
+
+        // Simulate stream end to complete handler
+        MockEventSource.instances[0].simulateEvent('lifecycle', { phase: 'end' });
+        await handlerPromise;
+
+        expect(signals.onClose).toHaveBeenCalled();
     });
 
-    test('assistant stream overwrites placeholder message with streamed content', async () => {
+    test('handler uses signals.onResponse with overwrite for stream updates', async () => {
         const { initChat } = await import('../../app/frontend/scripts/chat-ui.js');
         const element = createChatElement();
+        const signals = createMockSignals();
+        
         global.fetch.mockResolvedValueOnce({
             ok: true,
             json: () => Promise.resolve({ session_key: 'session-123' })
+        }).mockResolvedValueOnce({
+            ok: true,
+            json: () => Promise.resolve({})
         });
 
         await initChat(element);
-        element.addMessage({ text: '...', role: 'ai' });
+        global.fetch.mockClear();
 
-        await element.responseInterceptor({
-            run_id: 'run-123',
-            status: 'running',
-            session_key: 'session-123'
+        global.fetch.mockResolvedValueOnce({
+            ok: true,
+            json: () => Promise.resolve({ run_id: 'run-456' })
         });
+
+        const handlerPromise = element.handler(
+            { messages: [{ text: 'test message', role: 'user' }] },
+            signals
+        );
+
+        await new Promise(r => setTimeout(r, 100));
 
         const stream = MockEventSource.instances[0];
+        
+        // Simulate streaming delta
         stream.simulateEvent('assistant', { text: 'Hello', is_delta: true });
-        stream.simulateEvent('lifecycle', { phase: 'end' });
 
-        expect(element.addMessage).toHaveBeenCalledWith({
-            text: 'Hello',
-            role: 'ai',
-            overwrite: true
+        // Wait for 100ms throttle timer to complete
+        await new Promise(r => setTimeout(r, 150));
+
+        // Verify onResponse called with html (not text, since we use html mode for streaming)
+        expect(signals.onResponse).toHaveBeenCalledWith(
+            expect.objectContaining({ html: expect.stringContaining('Hello'), overwrite: true })
+        );
+
+        // Simulate stream end
+        stream.simulateEvent('lifecycle', { phase: 'end' });
+        await handlerPromise;
+
+        expect(signals.onClose).toHaveBeenCalled();
+    });
+
+    test('handler handles API error gracefully', async () => {
+        const { initChat } = await import('../../app/frontend/scripts/chat-ui.js');
+        const element = createChatElement();
+        const signals = createMockSignals();
+        
+        global.fetch.mockResolvedValueOnce({
+            ok: true,
+            json: () => Promise.resolve({ session_key: 'session-123' })
+        }).mockResolvedValueOnce({
+            ok: true,
+            json: () => Promise.resolve({})
         });
+
+        await initChat(element);
+        global.fetch.mockClear();
+
+        // Mock API error
+        global.fetch.mockResolvedValueOnce({
+            ok: false,
+            status: 500,
+            statusText: 'Internal Server Error'
+        });
+
+        await element.handler(
+            { messages: [{ text: 'test', role: 'user' }] },
+            signals
+        );
+
+        // Verify error response (uses html format)
+        expect(signals.onResponse).toHaveBeenCalledWith(
+            expect.objectContaining({ html: expect.stringContaining('Error: 500') })
+        );
+        expect(signals.onClose).toHaveBeenCalled();
+    });
+
+    test('handler extracts message from various body formats', async () => {
+        const { initChat } = await import('../../app/frontend/scripts/chat-ui.js');
+        const element = createChatElement();
+        
+        global.fetch.mockResolvedValueOnce({
+            ok: true,
+            json: () => Promise.resolve({ session_key: 'session-123' })
+        }).mockResolvedValueOnce({
+            ok: true,
+            json: () => Promise.resolve({})
+        });
+
+        await initChat(element);
+
+        // Test with messages array format
+        global.fetch.mockClear();
+        global.fetch.mockResolvedValueOnce({
+            ok: false, status: 400, statusText: 'Bad Request'
+        });
+        
+        await element.handler(
+            { messages: [{ text: 'from messages array', role: 'user' }] },
+            createMockSignals()
+        );
+
+        expect(global.fetch).toHaveBeenCalledWith(
+            expect.any(String),
+            expect.objectContaining({
+                body: expect.stringContaining('from messages array')
+            })
+        );
     });
 });

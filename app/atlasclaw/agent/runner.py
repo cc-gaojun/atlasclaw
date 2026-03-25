@@ -15,8 +15,13 @@ from __future__ import annotations
 
 import asyncio
 import time
+import logging
 from contextlib import asynccontextmanager, nullcontext
 from typing import AsyncIterator, Optional, Any, TYPE_CHECKING
+
+from pydantic_ai.messages import ThinkingPart
+
+logger = logging.getLogger(__name__)
 
 from app.atlasclaw.core.deps import SkillDeps
 from app.atlasclaw.agent.stream import StreamEvent
@@ -33,6 +38,40 @@ if TYPE_CHECKING:
     from app.atlasclaw.session.manager import SessionManager
     from app.atlasclaw.session.queue import SessionQueue
     from app.atlasclaw.hooks.system import HookSystem
+
+
+def _split_thinking_chunks(text: str, target_size: int = 5) -> list[str]:
+    """Split thinking content into chunks for streaming display.
+    
+    For small target sizes (<=10), splits by fixed size to simulate token-level streaming.
+    For larger sizes, splits at natural break points (punctuation, whitespace).
+    """
+    if len(text) <= target_size:
+        return [text]
+    
+    # For small chunks, use simple fixed-size splitting (token simulation)
+    if target_size <= 10:
+        return [text[i:i + target_size] for i in range(0, len(text), target_size)]
+    
+    chunks = []
+    remaining = text
+    while remaining:
+        if len(remaining) <= target_size:
+            chunks.append(remaining)
+            break
+        
+        # Find natural break point
+        best_pos = target_size
+        for delim in ['\n', '。', '！', '？', '，', '.', '!', '?', ',', ' ']:
+            pos = remaining.rfind(delim, int(target_size * 0.6), target_size + 1)
+            if pos > 0:
+                best_pos = pos + len(delim)
+                break
+        
+        chunks.append(remaining[:best_pos])
+        remaining = remaining[best_pos:]
+    
+    return chunks
 
 
 class AgentRunner:
@@ -90,6 +129,9 @@ class AgentRunner:
         tool_calls_count = 0
         compaction_applied = False
         assistant_emitted = False
+        thinking_started = False
+        thinking_start_time = None
+        thinking_chunk_count = 0  # Track chunks for simulated elapsed time
         persist_override_messages: Optional[list[dict]] = None
         persist_override_base_len: int = 0
         runtime_agent: Any = self.agent
@@ -242,18 +284,53 @@ class AgentRunner:
                             model_response = node.model_response
                             if hasattr(model_response, "parts"):
                                 for part in model_response.parts:
-                                    if hasattr(part, "content") and part.content:
-                                        content = str(part.content)
-                                        assistant_emitted = True
-                                        if self.hooks:
-                                            await self.hooks.trigger(
-                                                "llm_output",
-                                                {
-                                                    "session_key": session_key,
-                                                    "content": content,
-                                                },
-                                            )
-                                        yield StreamEvent.assistant_delta(content)
+                                    # Detect thinking parts (e.g., Claude, DeepSeek reasoning)
+                                    part_kind = getattr(part, "part_kind", None)
+                                    is_thinking = (
+                                        part_kind == "thinking"
+                                        or isinstance(part, ThinkingPart)
+                                    )
+
+                                    if is_thinking:
+                                        # Emit thinking events
+                                        if not thinking_started:
+                                            yield StreamEvent.thinking_start()
+                                            thinking_started = True
+                                            thinking_start_time = time.time()
+                                            thinking_chunk_count = 0
+                                        thinking_content = getattr(part, "content", "")
+                                        if thinking_content:
+                                            content_str = str(thinking_content)
+                                            # Small chunks (5 chars) + delay to simulate token-level streaming
+                                            chunks = _split_thinking_chunks(content_str, target_size=5)
+                                            for chunk in chunks:
+                                                yield StreamEvent.thinking_delta(chunk)
+                                                thinking_chunk_count += 1
+                                                await asyncio.sleep(0.015)  # 15ms delay between tokens
+                                    else:
+                                        # Try to get content from 'content' or 'text' attribute
+                                        text_content = getattr(part, "content", None) or getattr(part, "text", None)
+                                        if text_content:
+                                            # End thinking phase if transitioning to regular content
+                                            if thinking_started:
+                                                # Use actual wall clock time, with minimum based on simulated delay
+                                                wall_elapsed = time.time() - thinking_start_time if thinking_start_time else 0
+                                                simulated_elapsed = thinking_chunk_count * 0.015  # 15ms per chunk
+                                                # Use the larger of wall clock or simulated time
+                                                thinking_elapsed = round(max(wall_elapsed, simulated_elapsed), 1)
+                                                yield StreamEvent.thinking_end(elapsed=thinking_elapsed)
+                                                thinking_started = False
+                                            content = str(text_content)
+                                            assistant_emitted = True
+                                            if self.hooks:
+                                                await self.hooks.trigger(
+                                                    "llm_output",
+                                                    {
+                                                        "session_key": session_key,
+                                                        "content": content,
+                                                    },
+                                                )
+                                            yield StreamEvent.assistant_delta(content)
                         elif hasattr(node, "content") and node.content:
                             content = str(node.content)
                             if self.hooks:
@@ -314,6 +391,15 @@ class AgentRunner:
                                     yield StreamEvent.assistant_delta(f"\n[用户补充]: {combined}\n")
 
 
+                    # Ensure thinking phase is properly closed if still active.
+                    if thinking_started:
+                        # Use actual wall clock time, with minimum based on simulated delay
+                        wall_elapsed = time.time() - thinking_start_time if thinking_start_time else 0
+                        simulated_elapsed = thinking_chunk_count * 0.015  # 15ms per chunk
+                        thinking_elapsed = round(max(wall_elapsed, simulated_elapsed), 1)
+                        yield StreamEvent.thinking_end(elapsed=thinking_elapsed)
+                        thinking_started = False
+
                     # Persist the final normalized transcript.
                     final_messages = self._normalize_messages(agent_run.all_messages())
                     if persist_override_messages is not None:
@@ -324,20 +410,54 @@ class AgentRunner:
                             final_messages = persist_override_messages
 
                     if not assistant_emitted:
-                        final_assistant = next(
-                            (
-                                msg["content"]
-                                for msg in reversed(final_messages)
-                                if msg.get("role") == "assistant" and msg.get("content")
-                            ),
-                            "",
-                        )
+                        # Try to get response from agent_run.result first (pydantic-ai structure)
+                        final_assistant = ""
+                        if hasattr(agent_run, "result") and agent_run.result:
+                            result = agent_run.result
+                            # Try response property first
+                            if hasattr(result, "response") and result.response:
+                                response = result.response
+                                # Extract text content from response parts, excluding thinking parts
+                                if hasattr(response, "parts"):
+                                    for part in response.parts:
+                                        part_kind = getattr(part, "part_kind", "")
+                                        # Skip thinking parts, only extract text parts
+                                        if part_kind != "thinking" and hasattr(part, "content") and part.content:
+                                            content = str(part.content)
+                                            if content:
+                                                final_assistant = content
+                                                break
+                                elif hasattr(response, "content") and response.content:
+                                    final_assistant = str(response.content)
+                            # Try data property as fallback
+                            if not final_assistant and hasattr(result, "data") and result.data:
+                                final_assistant = str(result.data)
+                        
+                        # Fallback: search in final_messages
+                        if not final_assistant:
+                            final_assistant = next(
+                                (
+                                    msg["content"]
+                                    for msg in reversed(final_messages)
+                                    if msg.get("role") == "assistant" and msg.get("content")
+                                ),
+                                "",
+                            )
+                        
                         if final_assistant:
                             assistant_emitted = True
                             yield StreamEvent.assistant_delta(final_assistant)
                     await self.sessions.persist_transcript(session_key, final_messages)
 
             except Exception as e:
+                # Close thinking phase on exception to maintain contract
+                if thinking_started:
+                    wall_elapsed = time.time() - thinking_start_time if thinking_start_time else 0
+                    simulated_elapsed = thinking_chunk_count * 0.015
+                    thinking_elapsed = round(max(wall_elapsed, simulated_elapsed), 1)
+                    yield StreamEvent.thinking_end(elapsed=thinking_elapsed)
+                    thinking_started = False
+                        
                 # Surface agent runtime errors as stream events.
                 yield StreamEvent.error_event(f"agent_error: {str(e)}")
 
@@ -355,6 +475,14 @@ class AgentRunner:
             yield StreamEvent.lifecycle_end()
 
         except Exception as e:
+            # Close thinking phase on exception to maintain contract
+            if thinking_started:
+                wall_elapsed = time.time() - thinking_start_time if thinking_start_time else 0
+                simulated_elapsed = thinking_chunk_count * 0.015
+                thinking_elapsed = round(max(wall_elapsed, simulated_elapsed), 1)
+                yield StreamEvent.thinking_end(elapsed=thinking_elapsed)
+                thinking_started = False
+                
             yield StreamEvent.error_event(str(e))
         finally:
             if selected_token_id and self.token_interceptor is not None:
@@ -617,8 +745,12 @@ class AgentRunner:
         for part in parts:
             part_kind = getattr(part, "part_kind", "")
             part_content = getattr(part, "content", None)
-            if part_kind in {"text", "user-prompt", "system-prompt"}:
-                if isinstance(part_content, str):
+            # Skip thinking parts, extract all other text content
+            if part_kind == "thinking":
+                continue
+            # Include text parts and any other parts with content
+            if part_kind in {"text", "user-prompt", "system-prompt", ""}:
+                if isinstance(part_content, str) and part_content:
                     chunks.append(part_content)
                 elif isinstance(part_content, (list, tuple)):
                     chunks.extend(str(item) for item in part_content if item)

@@ -422,7 +422,7 @@ create PydanticAI Model instance
 
     def _create_openai_model(self, model_id: str, config: ProviderConfig) -> Any:
         """Create an OpenAI chat model instance."""
-        from pydantic_ai.models.openai import OpenAIChatModel
+        from pydantic_ai.models.openai import OpenAIChatModel, OpenAIModelProfile
         from pydantic_ai.providers.openai import OpenAIProvider
 
         provider_kwargs: dict[str, Any] = {}
@@ -432,20 +432,33 @@ create PydanticAI Model instance
             provider_kwargs["api_key"] = config.api_key
 
         provider = OpenAIProvider(**provider_kwargs)
-        return OpenAIChatModel(model_id, provider=provider)
+
+        # Check if reasoning mode is enabled via model configuration
+        model_def = next((m for m in config.models if m.id == model_id), None)
+        has_reasoning = model_def.reasoning if model_def else False
+
+        model_kwargs: dict[str, Any] = {"provider": provider}
+
+        if has_reasoning:
+            # Configure thinking field for OpenAI-compatible reasoning models
+            # This works for DeepSeek, OpenRouter, vLLM, and other compatible APIs
+            model_kwargs["profile"] = OpenAIModelProfile(
+                openai_chat_thinking_field="reasoning_content",
+            )
+
+        return OpenAIChatModel(model_id, **model_kwargs)
 
     def _create_anthropic_model(self, model_id: str, config: ProviderConfig) -> Any:
         """
-create Anthropic model
+        Create Anthropic model.
 
         Args:
-            model_id:model ID
-            config:Provider configuration
+            model_id: model ID
+            config: Provider configuration
 
         Returns:
             AnthropicModel instance
-        
-"""
+        """
         from pydantic_ai.models.anthropic import AnthropicModel
         from pydantic_ai.providers.anthropic import AnthropicProvider
 
@@ -456,20 +469,32 @@ create Anthropic model
             provider_kwargs["base_url"] = config.base_url
 
         provider = AnthropicProvider(**provider_kwargs)
-        return AnthropicModel(model_id, provider=provider)
+
+        # Check if reasoning mode is enabled via model configuration
+        model_def = next((m for m in config.models if m.id == model_id), None)
+        has_reasoning = model_def.reasoning if model_def else False
+
+        model_kwargs: dict[str, Any] = {"provider": provider}
+        if has_reasoning:
+            # Configure thinking for Anthropic Claude models
+            from pydantic_ai.models.anthropic import AnthropicModelSettings
+            model_kwargs["model_settings"] = AnthropicModelSettings(
+                anthropic_thinking={"type": "enabled", "budget_tokens": 10000}
+            )
+
+        return AnthropicModel(model_id, **model_kwargs)
 
     def _create_google_model(self, model_id: str, config: ProviderConfig) -> Any:
         """
-create Google Gemini model
+        Create Google Gemini model.
 
         Args:
-            model_id:model ID
-            config:Provider configuration
+            model_id: model ID
+            config: Provider configuration
 
         Returns:
             GoogleModel instance
-        
-"""
+        """
         from pydantic_ai.models.google import GoogleModel
         from pydantic_ai.providers.google import GoogleProvider
 
@@ -478,7 +503,20 @@ create Google Gemini model
             provider_kwargs["api_key"] = config.api_key
 
         provider = GoogleProvider(**provider_kwargs)
-        return GoogleModel(model_id, provider=provider)
+
+        # Check if reasoning mode is enabled via model configuration
+        model_def = next((m for m in config.models if m.id == model_id), None)
+        has_reasoning = model_def.reasoning if model_def else False
+
+        model_kwargs: dict[str, Any] = {"provider": provider}
+        if has_reasoning:
+            # Configure thinking for Google Gemini models
+            from pydantic_ai.models.google import GoogleModelSettings
+            model_kwargs["model_settings"] = GoogleModelSettings(
+                google_thinking_config={"include_thoughts": True}
+            )
+
+        return GoogleModel(model_id, **model_kwargs)
 
 
 # ============================================================
