@@ -21,6 +21,7 @@ from app.atlasclaw.auth.models import (
 )
 from app.atlasclaw.auth.providers.base import AuthProvider
 from app.atlasclaw.auth.shadow_store import ShadowUserStore
+from app.atlasclaw.core.workspace import UserWorkspaceInitializer
 
 logger = logging.getLogger(__name__)
 
@@ -66,6 +67,16 @@ class AuthStrategy:
         """Get the first (primary) provider."""
         return self._providers[0] if self._providers else None
 
+    def _ensure_user_workspace(self, user_id: str) -> None:
+        user_initializer = UserWorkspaceInitializer(
+            str(self._shadow_store.workspace_path),
+            user_id,
+        )
+        user_initializer.initialize()
+
+    def ensure_user_workspace(self, user_id: str) -> None:
+        self._ensure_user_workspace(user_id)
+
     async def resolve_user(self, credential: str) -> UserInfo:
         """
         Validate *credential* against all providers and return UserInfo.
@@ -88,6 +99,7 @@ class AuthStrategy:
         if credential in self._cache:
             user_info, expiry = self._cache[credential]
             if time.monotonic() < expiry:
+                self._ensure_user_workspace(user_info.user_id)
                 logger.debug("Auth cache hit")
                 return user_info
             del self._cache[credential]
@@ -105,6 +117,7 @@ class AuthStrategy:
                     provider=provider.provider_name(),
                     result=result,
                 )
+                self._ensure_user_workspace(shadow.user_id)
                 
                 user_info = shadow.to_user_info(raw_token=result.raw_token)
                 

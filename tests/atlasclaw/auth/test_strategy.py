@@ -7,6 +7,7 @@ AuthStrategy 单元测试
 
 from __future__ import annotations
 
+import json
 import time
 import pytest
 from unittest.mock import AsyncMock, MagicMock
@@ -84,3 +85,24 @@ class TestAuthStrategy:
         await strategy.resolve_user("token-A")  # cache hit
 
         assert len(calls) == 2  # token-A and token-B each called once
+
+    @pytest.mark.asyncio
+    async def test_login_creates_user_workspace(self, tmp_path):
+        workspace = tmp_path / "workspace"
+        store = ShadowUserStore(
+            store_path=str(tmp_path / "users.json"),
+            workspace_path=str(workspace),
+        )
+        provider = _MockProvider(subject="eve")
+        strategy = AuthStrategy(providers=[provider], shadow_store=store, cache_ttl_seconds=60)
+
+        user_info = await strategy.resolve_user("token-eve")
+        user_dir = workspace / "users" / user_info.user_id
+        user_config = user_dir / "user_setting.json"
+
+        assert (user_dir / "sessions").exists()
+        assert (user_dir / "memory").exists()
+        assert user_config.exists()
+        with open(user_config, "r", encoding="utf-8") as f:
+            config = json.load(f)
+        assert config == {"channels": {}, "preferences": {}}

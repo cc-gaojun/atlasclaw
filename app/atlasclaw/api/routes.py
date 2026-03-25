@@ -14,6 +14,7 @@ import logging
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Optional
 
 from fastapi import FastAPI
@@ -1019,6 +1020,7 @@ def create_router() -> APIRouter:
         """Authenticate local user, issue AtlasClaw JWT, and establish browser session."""
         from ..auth.config import AuthConfig
         from ..auth.providers.local import LocalAuthProvider
+        from ..core.workspace import UserWorkspaceInitializer
 
         auth_config: AuthConfig = getattr(request.app.state.config, "auth", None)
         if not auth_config or auth_config.provider.lower() != "local":
@@ -1048,6 +1050,8 @@ def create_router() -> APIRouter:
         )
         session_key_str = key.to_string(scope=SessionScope.MAIN)
         session = await ctx.session_manager.get_or_create(session_key_str)
+        workspace_path = str(Path(request.app.state.config.workspace.path).resolve())
+        UserWorkspaceInitializer(workspace_path, auth_result.subject).initialize()
 
         roles = auth_result.roles if isinstance(auth_result.roles, list) else []
         auth_type = auth_result.extra.get("auth_type", "local")
@@ -1215,7 +1219,10 @@ def create_router() -> APIRouter:
     ) -> JSONResponse:
         """Handle SSO callback from identity provider."""
         from ..auth.config import AuthConfig
-        
+        from ..auth.providers.oidc_sso import OIDCSSOProvider
+        from ..auth.shadow_store import ShadowUserStore
+        from ..core.workspace import UserWorkspaceInitializer
+
         # Handle IdP error
         if error:
             raise HTTPException(
@@ -1298,6 +1305,14 @@ def create_router() -> APIRouter:
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail=f"SSO authentication failed: {exc}"
             )
+        workspace_path = str(Path(request.app.state.config.workspace.path).resolve())
+        shadow_store = ShadowUserStore(workspace_path=workspace_path)
+        shadow_user = await shadow_store.get_or_create(
+            provider=auth_config.provider.lower(),
+            result=auth_result,
+        )
+        user_id = shadow_user.user_id
+        UserWorkspaceInitializer(workspace_path, user_id).initialize()
         
         # Create session via API context (session_manager is not on app.state)
         ctx = get_api_context()
@@ -1305,7 +1320,7 @@ def create_router() -> APIRouter:
             agent_id="main",
             channel="web",
             chat_type=SessionChatType.DM,
-            user_id=auth_result.subject,
+            user_id=user_id,
         )
         session_key_str = key.to_string(scope=SessionScope.MAIN)
         session = await ctx.session_manager.get_or_create(session_key_str)
@@ -1321,7 +1336,7 @@ def create_router() -> APIRouter:
         session.extra["is_admin"] = is_admin
 
         atlas_token = issue_atlas_token(
-            subject=auth_result.subject,
+            subject=user_id,
             is_admin=is_admin,
             roles=roles,
             auth_type=auth_type,

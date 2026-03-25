@@ -17,7 +17,6 @@ from typing import Optional
 import aiofiles
 
 from app.atlasclaw.auth.models import AuthResult, ShadowUser
-from app.atlasclaw.core.workspace import UserWorkspaceInitializer
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +39,10 @@ class ShadowUserStore:
         self._users: dict[str, ShadowUser] = {}    # user_id -> ShadowUser
         self._index: dict[str, str] = {}           # "provider:subject" -> user_id
         self._loaded = False
+
+    @property
+    def workspace_path(self) -> Path:
+        return self._workspace_path
 
     # ------------------------------------------------------------------
     # Public API
@@ -80,13 +83,7 @@ class ShadowUserStore:
             )
             self._users[user.user_id] = user
             self._index[index_key] = user.user_id
-            
-            # Initialize user workspace directory
-            user_initializer = UserWorkspaceInitializer(
-                str(self._workspace_path), user.user_id
-            )
-            user_initializer.initialize()
-            
+
             await self._save_locked()
             logger.info(
                 "ShadowUserStore: created user %s (%s:%s)",

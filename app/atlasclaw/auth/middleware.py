@@ -113,6 +113,8 @@ class AuthMiddleware(BaseHTTPMiddleware):
                 return self._auth_failed_response(request)
 
             jwt_user_info = self._build_user_info_from_payload(payload, atlas_token)
+            if provider_name != "local":
+                self._strategy.ensure_user_workspace(jwt_user_info.user_id)
 
             if provider_name == "oidc" and self._ocbc_enabled:
                 oidc_token = self._extract_oidc_token(request)
@@ -127,9 +129,12 @@ class AuthMiddleware(BaseHTTPMiddleware):
 
                 provider_subject = oidc_user.provider_subject or ""
                 oidc_subject = provider_subject.split(":", 1)[1] if ":" in provider_subject else ""
-                if oidc_subject and oidc_subject != jwt_user_info.user_id:
+                if oidc_user.user_id != jwt_user_info.user_id and (
+                    not oidc_subject or oidc_subject != jwt_user_info.user_id
+                ):
                     logger.debug(
-                        "OIDC subject mismatch (OCBC): oidc_subject=%s jwt_sub=%s",
+                        "OIDC identity mismatch (OCBC): oidc_user_id=%s oidc_subject=%s jwt_sub=%s",
+                        oidc_user.user_id,
                         oidc_subject,
                         jwt_user_info.user_id,
                     )

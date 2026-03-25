@@ -49,7 +49,7 @@ from app.atlasclaw.agent.prompt_builder import PromptBuilder, PromptBuilderConfi
 from app.atlasclaw.core.config import get_config, get_config_path
 from app.atlasclaw.core.provider_registry import ServiceProviderRegistry
 from app.atlasclaw.core.provider_scanner import ProviderScanner
-from app.atlasclaw.core.workspace import WorkspaceInitializer, UserWorkspaceInitializer
+from app.atlasclaw.core.workspace import WorkspaceInitializer
 from app.atlasclaw.agent.agent_definition import AgentLoader
 from app.atlasclaw.channels import ChannelRegistry
 from app.atlasclaw.channels.manager import ChannelManager
@@ -58,6 +58,7 @@ from app.atlasclaw.channels.handlers.feishu import FeishuHandler
 from app.atlasclaw.channels.handlers.dingtalk import DingTalkHandler
 from app.atlasclaw.channels.handlers.wecom import WeComHandler
 from app.atlasclaw.auth import AuthRegistry
+from app.atlasclaw.auth.shadow_store import ShadowUserStore
 from app.atlasclaw.agent.agent_pool import AgentInstancePool
 from app.atlasclaw.agent.token_policy import DynamicTokenPolicy
 from app.atlasclaw.core.token_health_store import TokenHealthStore
@@ -464,12 +465,6 @@ async def lifespan(app: FastAPI):
     # Check if providers and skills are empty and prompt user
     _check_and_prompt_for_providers_skills(workspace_path, providers_root)
 
-    # Initialize default user directory (for non-authenticated mode)
-    default_user_initializer = UserWorkspaceInitializer(workspace_path, "default")
-    if not default_user_initializer.is_initialized():
-        default_user_initializer.initialize()
-        print(f"[AtlasClaw] Initialized default user directory")
-    
     # Initialize database if configured
     db_initialized = False
     if config.database:
@@ -758,17 +753,31 @@ async def lifespan(app: FastAPI):
 
 
     # Expose config on app.state so routes (e.g. SSO) can access it
+    # Preserve existing auth config if already set by create_app()
+    existing_auth = getattr(app.state.config, 'auth', None) if hasattr(app.state, 'config') else None
     app.state.config = config
+    
     # Coerce auth dict → AuthConfig object so SSO routes can call .provider / .oidc
-    if config.auth is not None:
-        from app.atlasclaw.auth.config import AuthConfig
-        if isinstance(config.auth, dict):
-            app.state.config.auth = AuthConfig(**config.auth)
+    from app.atlasclaw.auth.config import AuthConfig
+    auth_source = config.auth if config.auth is not None else existing_auth
+    
+    if auth_source is not None:
+        if isinstance(auth_source, dict):
+            auth_obj = AuthConfig(**auth_source)
+        elif isinstance(auth_source, AuthConfig):
+            auth_obj = auth_source
         else:
-            app.state.config.auth = config.auth
-        # Treat disabled auth same as no auth
-        if not app.state.config.auth.enabled:
+            auth_obj = None
+        
+        if auth_obj and auth_obj.enabled:
+            app.state.config.auth = auth_obj
+            print(f"[AtlasClaw] Auth configured with provider='{auth_obj.provider}'")
+        else:
             app.state.config.auth = None
+            print("[AtlasClaw] Auth disabled or not configured")
+    else:
+        app.state.config.auth = None
+        print("[AtlasClaw] Auth config not present, running in anonymous mode")
 
     api_context = APIContext(
         session_manager=_session_manager,
@@ -907,7 +916,9 @@ def create_app() -> FastAPI:
         # Respect the enabled flag — disabled auth runs in anonymous mode
         if _auth is not None and not _auth.enabled:
             _auth = None
-        setup_auth_middleware(app, _auth)
+        auth_workspace_path = str(Path(_cfg.workspace.path).resolve())
+        shadow_store = ShadowUserStore(workspace_path=auth_workspace_path)
+        setup_auth_middleware(app, _auth, shadow_store=shadow_store)
 
         # Store config reference for routes to use
         app.state.config = _cfg
