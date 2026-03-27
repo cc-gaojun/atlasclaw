@@ -62,15 +62,6 @@
     ]
   },
   "service_providers": {
-    "jira": {
-      "dev": {
-        "base_url": "http://192.168.1.107:8080/",
-        "username": "${JIRA_USERNAME}",
-        "password": "${JIRA_PASSWORD}",
-        "api_version": "2",
-        "default_project": "TEST"
-      }
-    },
     "smartcmp": {
       "default": {
         "base_url": "${CMP_URL}",
@@ -89,8 +80,8 @@
     }
   },
   "auth": {
-    "enabled": true,
-    "provider": "local",
+    "enabled": false,
+    "provider": "none",
     "cache_ttl_seconds": 300,
     "jwt": {
       "header_name": "AtlasClaw-Authenticate",
@@ -125,9 +116,6 @@
       "pkce_method": "S256",
       "subject_field": "unionId"
     }
-  },
-  "skills": {
-    "allow_script_execution": true
   },
   "agent_defaults": {
     "max_concurrent": 10

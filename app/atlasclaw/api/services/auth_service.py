@@ -314,7 +314,6 @@ async def get_current_user_payload(request: Request) -> dict[str, Any]:
 
     auth_config: AuthConfig = getattr(request.app.state.config, "auth", None)
     if not auth_config:
-        # Auth disabled — return anonymous user payload
         user_info = getattr(request.state, "user_info", None)
         if user_info:
             return {

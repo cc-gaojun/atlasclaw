@@ -18,11 +18,6 @@ logger = logging.getLogger(__name__)
 
 
 def build_provider_config(ctx: APIContext) -> dict[str, Any]:
-    """Build full provider config dict with instance configs (not just names).
-
-    Returns:
-        Dict like {"smartcmp": {"prod": {"base_url": "...", ...}, ...}}
-    """
     if ctx.service_provider_registry:
         return ctx.service_provider_registry.get_all_instance_configs()
     return {}
