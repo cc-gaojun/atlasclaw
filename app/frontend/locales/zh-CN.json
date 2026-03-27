@@ -177,6 +177,10 @@
     "nameRequired": "请输入连接名称",
     "requiredFieldsMissing": "请填写所有必填字段",
     "saveFirst": "请先保存连接再验证",
+    "runtimeConnected": "已连接",
+    "runtimeDisconnected": "未连接",
+    "runtimeConnecting": "连接中",
+    "runtimeError": "连接错误",
     "configHint": "配置提示",
     "oneOfHint": {
       "client_id_or_webhook_url": "填写 AppKey 或 Webhook 地址（二选一）",

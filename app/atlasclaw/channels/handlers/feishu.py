@@ -45,6 +45,9 @@ def _run_feishu_sdk_process(
     import lark_oapi as lark
     from lark_oapi.api.im.v1 import P2ImMessageReceiveV1
     
+    # Flag to track if connection signal has been sent
+    connection_signaled = False
+    
     def handle_message(data: P2ImMessageReceiveV1):
         """Handle received message and send to queue."""
         try:
@@ -79,6 +82,14 @@ def _run_feishu_sdk_process(
         except Exception as e:
             print(f"[Feishu SDK Process] Error handling message: {e}")
     
+    def send_connected_signal():
+        """Send connected signal after delay if process is still running."""
+        nonlocal connection_signaled
+        if not connection_signaled:
+            connection_signaled = True
+            print("[Feishu SDK Process] Connection established, sending signal")
+            control_queue.put({"type": "connected"})
+    
     try:
         print(f"[Feishu SDK Process] Starting with app_id: {app_id}")
         
@@ -97,13 +108,20 @@ def _run_feishu_sdk_process(
             log_level=lark.LogLevel.INFO,
         )
         
+        # Use timer to send connected signal after delay
+        # If client.start() throws exception before timer fires, the signal won't be sent
+        timer = threading.Timer(5.0, send_connected_signal)
+        timer.daemon = True
+        timer.start()
+        
         # Start the client (blocking)
         print("[Feishu SDK Process] Connecting...")
         client.start()
         
     except Exception as e:
         print(f"[Feishu SDK Process] Error: {e}")
-        control_queue.put({"type": "error", "error": str(e)})
+        if not connection_signaled:
+            control_queue.put({"type": "error", "error": str(e)})
 
 
 class FeishuHandler(ChannelHandler):
@@ -163,11 +181,55 @@ class FeishuHandler(ChannelHandler):
             self._status = ConnectionStatus.ERROR
             return False
     
+    async def _verify_credentials(self) -> bool:
+        """Verify Feishu credentials by getting tenant_access_token.
+        
+        This validates the app_id/app_secret before starting the SDK subprocess.
+        Returns True if credentials are valid, False otherwise.
+        """
+        app_id = self.config.get("app_id")
+        app_secret = self.config.get("app_secret")
+        
+        if not app_id or not app_secret:
+            logger.error("[Feishu] Missing app_id or app_secret")
+            return False
+        
+        try:
+            url = f"{self.FEISHU_API_BASE}/auth/v3/tenant_access_token/internal"
+            payload = {"app_id": app_id, "app_secret": app_secret}
+            async with aiohttp.ClientSession(trust_env=True) as session:
+                async with session.post(url, json=payload, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+                    data = await resp.json()
+                    if data.get("code") == 0 and data.get("tenant_access_token"):
+                        logger.info("[Feishu] Credentials verified successfully")
+                        return True
+                    else:
+                        logger.error(f"[Feishu] Credential verification failed: {data.get('msg', 'unknown error')}")
+                        return False
+        except Exception as e:
+            logger.error(f"[Feishu] Credential verification error: {e}")
+            return False
+
+    async def _cleanup_connect_failure(self) -> None:
+        """Cleanup resources after connect failure."""
+        self._running = False
+        if self._process and self._process.is_alive():
+            self._process.terminate()
+            self._process.join(timeout=5)
+        self._process = None
+        self._message_queue = None
+        self._control_queue = None
+
     async def connect(self) -> bool:
         """Establish connection using multiprocessing."""
         try:
             app_id = self.config.get("app_id")
             app_secret = self.config.get("app_secret")
+            
+            # Pre-verify credentials before starting SDK subprocess
+            if not await self._verify_credentials():
+                self._status = ConnectionStatus.ERROR
+                return False
             
             print(f"[Feishu] Connecting with app_id: {app_id}")
             
@@ -193,21 +255,46 @@ class FeishuHandler(ChannelHandler):
             self._listener_thread.start()
             print("[Feishu] Message listener started")
             
-            # Wait a bit for connection
-            await asyncio.sleep(3)
+            # Wait for connection result from subprocess via control_queue
+            # Timeout: 15 seconds (subprocess sends signal after 5 seconds if successful)
+            connection_timeout = 15.0
+            start_time = time.time()
             
-            if self._process.is_alive():
-                self._status = ConnectionStatus.CONNECTED
-                logger.info("Feishu connected via multiprocessing")
-                return True
-            else:
-                logger.error("Feishu SDK process died")
-                self._status = ConnectionStatus.ERROR
-                return False
+            while time.time() - start_time < connection_timeout:
+                # Check if process died
+                if not self._process.is_alive():
+                    logger.error("Feishu SDK process died unexpectedly")
+                    self._status = ConnectionStatus.ERROR
+                    await self._cleanup_connect_failure()
+                    return False
+                
+                # Try to get message from control queue (non-blocking)
+                try:
+                    msg = self._control_queue.get_nowait()
+                    if msg.get("type") == "connected":
+                        self._status = ConnectionStatus.CONNECTED
+                        logger.info("Feishu connected via multiprocessing")
+                        return True
+                    elif msg.get("type") == "error":
+                        error = msg.get("error", "Unknown error")
+                        logger.error(f"Feishu connection failed: {error}")
+                        self._status = ConnectionStatus.ERROR
+                        await self._cleanup_connect_failure()
+                        return False
+                except queue.Empty:
+                    await asyncio.sleep(0.5)
+                    continue
+            
+            # Timeout reached
+            logger.error("Feishu connection timeout")
+            self._status = ConnectionStatus.ERROR
+            await self._cleanup_connect_failure()
+            return False
                 
         except Exception as e:
             logger.error(f"Feishu connect failed: {e}")
             self._status = ConnectionStatus.ERROR
+            await self._cleanup_connect_failure()
             return False
     
     def _listen_for_messages(self):

@@ -74,6 +74,7 @@ class ConnectionResponse(BaseModel):
     config: Dict[str, Any]
     enabled: bool
     is_default: bool
+    runtime_status: str = "disconnected"  # connected/disconnected/connecting/error
 
 
 class ChannelTypeResponse(BaseModel):
@@ -89,6 +90,11 @@ class ValidationResponse(BaseModel):
     """Response model for config validation."""
     valid: bool
     errors: List[str] = []
+
+
+class ConfigValidationRequest(BaseModel):
+    """Request model for config validation without saving."""
+    config: Dict[str, Any]
 
 
 # Routes
@@ -155,6 +161,7 @@ async def get_channel_schema(channel_type: str) -> Dict[str, Any]:
 async def list_connections(
     channel_type: str,
     request: Request,
+    manager: ChannelManager = Depends(get_channel_manager),
     session: AsyncSession = Depends(get_db_session)
 ) -> Dict[str, Any]:
     """List all connections for a channel type.
@@ -163,7 +170,7 @@ async def list_connections(
         channel_type: Channel type identifier
         
     Returns:
-        List of connections
+        List of connections with runtime status
     """
     user_id = get_current_user_id(request)
     
@@ -175,12 +182,18 @@ async def list_connections(
         session, user_id, channel_type
     )
     
+    # Build response with runtime status
+    result = []
+    for conn in connections:
+        conn_data = ChannelConfigService.to_channel_config(conn)
+        # Get runtime status from channel manager
+        runtime_status = manager.get_connection_runtime_status(conn.id)
+        conn_data["runtime_status"] = runtime_status
+        result.append(conn_data)
+    
     return {
         "channel_type": channel_type,
-        "connections": [
-            ChannelConfigService.to_channel_config(conn)
-            for conn in connections
-        ]
+        "connections": result
     }
 
 
@@ -315,6 +328,36 @@ async def delete_connection(
     return JSONResponse(content={"status": "ok", "message": "Connection deleted"})
 
 
+@router.post("/{channel_type}/validate-config")
+async def validate_config(
+    channel_type: str,
+    data: ConfigValidationRequest,
+    request: Request
+) -> ValidationResponse:
+    """Validate channel configuration without saving to database.
+    
+    Args:
+        channel_type: Channel type identifier
+        data: Configuration data to validate
+        
+    Returns:
+        Validation result
+    """
+    get_current_user_id(request)  # Still require authentication
+    
+    handler_class = ChannelRegistry.get(channel_type)
+    if not handler_class:
+        raise HTTPException(status_code=404, detail=f"Channel type not found: {channel_type}")
+    
+    try:
+        handler = handler_class(data.config)
+        result = await handler.validate_config(data.config)
+        return ValidationResponse(valid=result.valid, errors=result.errors)
+    except Exception as e:
+        logger.error(f"Config validation failed for {channel_type}: {e}")
+        return ValidationResponse(valid=False, errors=[str(e)])
+
+
 @router.post("/{channel_type}/connections/{connection_id}/verify")
 async def verify_connection(
     channel_type: str,
@@ -343,7 +386,7 @@ async def verify_connection(
     
     # Create handler instance and validate
     try:
-        config = channel.config or {}
+        config = _decrypt_config(channel.config)
         handler = handler_class(config)
         result = await handler.validate_config(config)
         return ValidationResponse(valid=result.valid, errors=result.errors)
@@ -373,7 +416,7 @@ async def enable_connection(
     if not await manager.enable_connection(user_id, channel_type, connection_id):
         raise HTTPException(status_code=500, detail="Failed to enable connection")
     
-    return JSONResponse(content={"status": "ok", "message": "Connection enabled"})
+    return JSONResponse(content={"status": "ok", "message": "Connection enabled, initializing in background"})
 
 
 @router.post("/{channel_type}/connections/{connection_id}/disable")

@@ -197,10 +197,13 @@ class ChannelManager:
             
             # Import SkillDeps locally to avoid circular imports
             from app.atlasclaw.core.deps import SkillDeps
-            from app.atlasclaw.auth.models import ANONYMOUS_USER
+            from app.atlasclaw.auth.models import UserInfo
+            
+            # 使用连接所有者的 user_id，而非匿名用户
+            user_info = UserInfo(user_id=user_id, display_name=user_id.capitalize())
             
             deps = SkillDeps(
-                user_info=ANONYMOUS_USER,
+                user_info=user_info,
                 peer_id=message.sender_id,
                 session_key=session_key,
                 channel=channel_type,
@@ -429,16 +432,45 @@ class ChannelManager:
             connection_id: Connection identifier
 
         Returns:
-            True if enabled successfully
+            True if enabled successfully (DB status updated, initialization started in background)
         """
         from app.atlasclaw.db import get_db_manager
 
+        # Step 1: Update DB status (synchronous, fast)
         async with get_db_manager().get_session() as session:
             channel = await ChannelConfigService.update_status(session, connection_id, True)
             if not channel:
                 return False
 
-        return await self.initialize_connection(user_id, channel_type, connection_id)
+        # Step 2: Initialize connection in background (async, don't block API response)
+        asyncio.create_task(self._background_initialize(user_id, channel_type, connection_id))
+        return True
+
+    async def _background_initialize(
+        self,
+        user_id: str,
+        channel_type: str,
+        connection_id: str
+    ) -> None:
+        """Initialize connection in background. Status is tracked via handler._status.
+
+        Args:
+            user_id: User identifier
+            channel_type: Channel type
+            connection_id: Connection identifier
+        """
+        try:
+            result = await self.initialize_connection(user_id, channel_type, connection_id)
+            if not result:
+                logger.warning(
+                    f"Background connection initialization failed: "
+                    f"{channel_type}/{connection_id}"
+                )
+        except Exception as e:
+            logger.error(
+                f"Background connection initialization error: "
+                f"{channel_type}/{connection_id}: {e}"
+            )
 
     async def disable_connection(
         self,
@@ -463,3 +495,42 @@ class ChannelManager:
         async with get_db_manager().get_session() as session:
             channel = await ChannelConfigService.update_status(session, connection_id, False)
             return channel is not None
+
+    def get_connection_runtime_status(
+        self,
+        connection_id: str
+    ) -> str:
+        """Get runtime connection status for a specific connection.
+        
+        Searches _active_connections by connection_id suffix,
+        since connection_id is globally unique (UUID).
+        
+        Args:
+            connection_id: Connection identifier (UUID)
+        
+        Returns:
+            Runtime status string: "connected", "disconnected", "connecting", or "error"
+        """
+        from .models import ConnectionStatus
+
+        # Search for handler by connection_id (last part of instance_key)
+        handler = None
+        for key, h in self._active_connections.items():
+            if key.endswith(f":{connection_id}"):
+                handler = h
+                break
+        
+        if not handler:
+            return "disconnected"
+        
+        try:
+            status = handler.get_status()
+            status_map = {
+                ConnectionStatus.CONNECTED: "connected",
+                ConnectionStatus.CONNECTING: "connecting",
+                ConnectionStatus.DISCONNECTED: "disconnected",
+                ConnectionStatus.ERROR: "error",
+            }
+            return status_map.get(status, "disconnected")
+        except Exception:
+            return "disconnected"

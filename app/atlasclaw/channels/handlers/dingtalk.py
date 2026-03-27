@@ -3,9 +3,11 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import multiprocessing
+import queue
 import threading
 import time
 from typing import Any, Callable, Dict, Optional
@@ -38,8 +40,12 @@ def _run_dingtalk_sdk_process(
     """
     import os
     import logging
+    import threading
     import dingtalk_stream
     from dingtalk_stream import AckMessage
+    
+    # Flag to track if connection signal has been sent
+    connection_signaled = False
     
     # 默认支持环境代理（HTTP_PROXY/HTTPS_PROXY）。
     # 如需强制绕过 WebSocket 代理，可设置: ATLASCLAW_BYPASS_WS_PROXY=true
@@ -71,6 +77,14 @@ def _run_dingtalk_sdk_process(
     proc_logger = logging.getLogger("dingtalk_sdk_process")
     
     print(f"[DingTalk SDK Process] Starting with client_id: {client_id}")
+    
+    def send_connected_signal():
+        """Send connected signal after delay if process is still running."""
+        nonlocal connection_signaled
+        if not connection_signaled:
+            connection_signaled = True
+            print("[DingTalk SDK Process] Connection established, sending signal")
+            control_queue.put({"type": "connected"})
     
     class MessageHandler(dingtalk_stream.ChatbotHandler):
         """Handler for incoming DingTalk messages."""
@@ -120,6 +134,12 @@ def _run_dingtalk_sdk_process(
             MessageHandler(message_queue, proc_logger)
         )
         
+        # Use timer to send connected signal after delay
+        # If start_forever() throws exception before timer fires, the signal won't be sent
+        timer = threading.Timer(5.0, send_connected_signal)
+        timer.daemon = True
+        timer.start()
+        
         # start_forever runs the event loop
         client.start_forever()
         
@@ -128,6 +148,8 @@ def _run_dingtalk_sdk_process(
     except Exception as e:
         print(f"[DingTalk SDK Process] Connection error: {e}")
         proc_logger.exception("DingTalk SDK connection error")
+        if not connection_signaled:
+            control_queue.put({"type": "error", "error": str(e)})
 
 
 class DingTalkHandler(ChannelHandler):
@@ -175,7 +197,7 @@ class DingTalkHandler(ChannelHandler):
     async def start(self, context: Any) -> bool:
         """Start DingTalk handler."""
         try:
-            self._status = ConnectionStatus.CONNECTED
+            self._status = ConnectionStatus.CONNECTING
             logger.info("[DingTalk] Handler started")
             return True
         except Exception as e:
@@ -183,6 +205,44 @@ class DingTalkHandler(ChannelHandler):
             self._status = ConnectionStatus.ERROR
             return False
     
+    async def _verify_credentials(self) -> bool:
+        """Verify DingTalk credentials by calling the gettoken API.
+        
+        This validates the client_id/client_secret before starting the SDK subprocess.
+        Returns True if credentials are valid, False otherwise.
+        """
+        client_id = self.config.get("client_id") or self.config.get("app_key")
+        client_secret = self.config.get("client_secret") or self.config.get("app_secret")
+        
+        if not client_id or not client_secret:
+            logger.error("[DingTalk] Missing client_id or client_secret")
+            return False
+        
+        try:
+            url = f"{self.OAPI_BASE}/gettoken?appkey={client_id}&appsecret={client_secret}"
+            async with aiohttp.ClientSession(trust_env=True) as session:
+                async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+                    data = await resp.json()
+                    if data.get("errcode") == 0 and data.get("access_token"):
+                        logger.info("[DingTalk] Credentials verified successfully")
+                        return True
+                    else:
+                        logger.error(f"[DingTalk] Credential verification failed: {data.get('errmsg', 'unknown error')}")
+                        return False
+        except Exception as e:
+            logger.error(f"[DingTalk] Credential verification error: {e}")
+            return False
+
+    async def _cleanup_connect_failure(self) -> None:
+        """Cleanup resources after connect failure."""
+        self._running = False
+        if self._process and self._process.is_alive():
+            self._process.terminate()
+            self._process.join(timeout=5)
+        self._process = None
+        self._message_queue = None
+        self._control_queue = None
+
     async def connect(self) -> bool:
         """Connect to DingTalk using Stream mode or prepare for webhook mode."""
         try:
@@ -198,6 +258,10 @@ class DingTalkHandler(ChannelHandler):
             
             # Use Stream mode with multiprocessing
             if client_id and client_secret:
+                # Pre-verify credentials before starting SDK subprocess
+                if not await self._verify_credentials():
+                    self._status = ConnectionStatus.ERROR
+                    return False
                 logger.info(f"[DingTalk] Connecting with client_id: {client_id}")
                 
                 self._message_queue = multiprocessing.Queue()
@@ -220,8 +284,41 @@ class DingTalkHandler(ChannelHandler):
                 self._listener_thread.start()
                 logger.info("[DingTalk] Message listener started")
                 
-                self._status = ConnectionStatus.CONNECTED
-                return True
+                # Wait for connection result from subprocess via control_queue
+                # Timeout: 15 seconds (subprocess sends signal after 5 seconds if successful)
+                connection_timeout = 15.0
+                start_time = time.time()
+                
+                while time.time() - start_time < connection_timeout:
+                    # Check if process died
+                    if not self._process.is_alive():
+                        logger.error("[DingTalk] SDK process died unexpectedly")
+                        self._status = ConnectionStatus.ERROR
+                        await self._cleanup_connect_failure()
+                        return False
+                    
+                    # Try to get message from control queue (non-blocking)
+                    try:
+                        msg = self._control_queue.get_nowait()
+                        if msg.get("type") == "connected":
+                            self._status = ConnectionStatus.CONNECTED
+                            logger.info("[DingTalk] Connected via Stream mode")
+                            return True
+                        elif msg.get("type") == "error":
+                            error = msg.get("error", "Unknown error")
+                            logger.error(f"[DingTalk] Connection failed: {error}")
+                            self._status = ConnectionStatus.ERROR
+                            await self._cleanup_connect_failure()
+                            return False
+                    except queue.Empty:
+                        await asyncio.sleep(0.5)
+                        continue
+                
+                # Timeout reached
+                logger.error("[DingTalk] Connection timeout")
+                self._status = ConnectionStatus.ERROR
+                await self._cleanup_connect_failure()
+                return False
             
             logger.error("[DingTalk] No valid configuration (need client_id/client_secret or webhook_url)")
             return False
@@ -229,6 +326,7 @@ class DingTalkHandler(ChannelHandler):
         except Exception as e:
             logger.error(f"[DingTalk] Connect failed: {e}")
             self._status = ConnectionStatus.ERROR
+            await self._cleanup_connect_failure()
             return False
     
     def _listen_for_messages(self):

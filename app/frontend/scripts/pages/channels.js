@@ -304,6 +304,22 @@ async function verifyConnection(type, id) {
   return await res.json()
 }
 
+/**
+ * Validate config draft without saving
+ */
+async function validateConfigDraft(type, config) {
+  const res = await fetch(`/api/channels/${type}/validate-config`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ config })
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.detail || `HTTP ${res.status}`)
+  }
+  return await res.json()
+}
+
 // ========== UI Rendering ==========
 
 /**
@@ -433,8 +449,26 @@ async function renderChannelDetailView(type) {
  * Render a single connection item
  */
 function renderConnectionItem(conn) {
-  const statusClass = conn.enabled ? 'connected' : 'disconnected'
-  const statusText = conn.enabled ? t('channel.connected') : t('channel.disconnected')
+  // Runtime status determines connection indicator color
+  const runtimeStatus = conn.runtime_status || 'disconnected'
+  const statusClassMap = {
+    'connected': 'status-connected',
+    'disconnected': 'status-disconnected',
+    'connecting': 'status-connecting',
+    'error': 'status-error'
+  }
+  const statusClass = statusClassMap[runtimeStatus] || 'status-disconnected'
+
+  // Localized runtime status text
+  const runtimeStatusTextMap = {
+    'connected': t('channel.runtimeConnected'),
+    'disconnected': t('channel.runtimeDisconnected'),
+    'connecting': t('channel.runtimeConnecting'),
+    'error': t('channel.runtimeError')
+  }
+  const runtimeStatusText = runtimeStatusTextMap[runtimeStatus] || t('channel.runtimeDisconnected')
+
+  // Enabled/disabled toggle text
   const toggleText = conn.enabled ? t('channel.disable') : t('channel.enable')
 
   // Show first config field as preview
@@ -444,12 +478,12 @@ function renderConnectionItem(conn) {
 
   return `
     <div class="connection-item" data-id="${conn.id}">
-      <div class="connection-status ${statusClass}"></div>
+      <div class="connection-status ${statusClass}" title="${runtimeStatusText}"></div>
       <div class="connection-info">
         <div class="connection-name">${conn.name || conn.id}</div>
         <div class="connection-detail">${configPreview}</div>
       </div>
-      <div class="connection-status-text">${statusText}</div>
+      <div class="connection-status-text">${runtimeStatusText}</div>
       <div class="connection-actions">
         <button class="btn-small btn-edit" data-action="edit">${t('channel.edit')}</button>
         <button class="btn-small btn-toggle" data-action="toggle" data-enabled="${conn.enabled}">${toggleText}</button>
@@ -800,16 +834,46 @@ async function handleSave() {
 }
 
 /**
- * Handle verify button
+ * Handle verify button - validate config without saving
  */
 async function handleVerify() {
-  if (!editingConnectionId) {
-    showToast(t('channel.saveFirst'), 'warning')
+  const form = $('#configForm')
+  if (!form) return
+
+  const inputs = form.querySelectorAll('input, select')
+  const config = {}
+  let hasValidationError = false
+
+  // Collect config from form and validate visible required fields
+  for (const input of inputs) {
+    // Skip connection name field - it's not part of config
+    if (input.name === '_name') continue
+
+    const formGroup = input.closest('.form-group')
+    const isVisible = formGroup && formGroup.style.display !== 'none'
+    const isConditionalRequired = input.hasAttribute('data-conditional-required')
+    const isRequired = input.required || (isVisible && isConditionalRequired)
+
+    if (isRequired && isVisible && !input.value.trim()) {
+      input.classList.add('input-error')
+      hasValidationError = true
+    } else {
+      input.classList.remove('input-error')
+    }
+
+    // Collect config value
+    if (input.value.trim()) {
+      config[input.name] = input.value.trim()
+    }
+  }
+
+  if (hasValidationError) {
+    showToast(t('channel.requiredFieldsMissing') || 'Please fill in all required fields', 'error')
     return
   }
 
   try {
-    const result = await verifyConnection(currentChannelType, editingConnectionId)
+    const result = await validateConfigDraft(currentChannelType, config)
     if (result.valid) {
       showToast(t('channel.verifySuccess'), 'success')
     } else {

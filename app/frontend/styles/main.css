@@ -508,6 +508,7 @@ deep-chat::part(input-area) {
     flex-shrink: 0;
 }
 
+/* Legacy classes for backward compatibility */
 .connection-status.connected {
     background: #27ae60;
 }
@@ -518,6 +519,33 @@ deep-chat::part(input-area) {
 
 .connection-status.error {
     background: #e74c3c;
+}
+
+/* New runtime status classes */
+.connection-status.status-connected {
+    background: #27ae60;
+}
+
+.connection-status.status-disconnected {
+    background: #95a5a6;
+}
+
+.connection-status.status-connecting {
+    background: #f39c12;
+    animation: pulse 1.5s infinite;
+}
+
+.connection-status.status-error {
+    background: #e74c3c;
+}
+
+@keyframes pulse {
+    0%, 100% {
+        opacity: 1;
+    }
+    50% {
+        opacity: 0.5;
+    }
 }
 
 .connection-info {

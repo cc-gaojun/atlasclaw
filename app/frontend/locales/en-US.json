@@ -177,6 +177,10 @@
     "nameRequired": "Please enter a connection name",
     "requiredFieldsMissing": "Please fill in all required fields",
     "saveFirst": "Please save the connection before verifying",
+    "runtimeConnected": "Connected",
+    "runtimeDisconnected": "Disconnected",
+    "runtimeConnecting": "Connecting",
+    "runtimeError": "Connection Error",
     "configHint": "Configuration hint",
     "oneOfHint": {
       "client_id_or_webhook_url": "Fill in AppKey OR Webhook URL (choose one)",
