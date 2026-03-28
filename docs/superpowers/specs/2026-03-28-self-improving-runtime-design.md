@@ -189,6 +189,86 @@ workspace/users/<user_id>/
 
 ## Event Types
 
+## Event Taxonomy
+
+为了对齐 OpenClaw 的 hook 能力模型，事件必须拆成两层：
+
+1. `Hook Runtime Events`
+- Hook Runtime 原生分发的生命周期事件
+- 面向所有未来 hook modules
+- 不带 `self-improving` 特例语义
+
+2. `Derived Self-Improving Events`
+- `self-improving` 模块从 Hook Runtime Events 推导出来的候选学习事件
+- 面向 learning / pending / confirmation 流程
+
+### Layer 1: Hook Runtime Events
+
+建议定义统一的 `HookEventType`，第一阶段至少包含：
+
+- `run.started`
+- `run.completed`
+- `run.failed`
+- `message.received`
+- `message.user_corrected`
+- `llm.requested`
+- `llm.completed`
+- `llm.failed`
+- `tool.started`
+- `tool.completed`
+- `tool.failed`
+- `memory.confirmed`
+- `memory.rejected`
+
+说明：
+
+- `run.*` 负责描述一次 agent 运行的生命周期
+- `message.*` 负责描述消息进入与显式纠正
+- `llm.*` 负责描述模型调用阶段
+- `tool.*` 负责描述工具调用阶段
+- `memory.*` 负责描述候选 lesson 的最终晋升结果
+
+### Layer 2: Derived Self-Improving Events
+
+`self-improving` 不是直接定义 Hook Runtime 的底层事件，而是从上述统一事件中推导出三类学习语义：
+
+- `correction_candidate`
+- `reflection_candidate`
+- `failure_candidate`
+
+这样可以保证：
+
+- Hook Runtime 是通用的
+- `self-improving` 只是第一个订阅者
+- 未来其它模块可以订阅同一套 runtime events，而不需要重新定义底层事件
+
+### Hook Event Envelope
+
+建议所有 Hook Runtime Events 采用统一 envelope：
+
+- `id`
+- `event_type`
+- `user_id`
+- `session_key`
+- `run_id`
+- `channel`
+- `agent_id`
+- `created_at`
+- `payload`
+
+其中：
+
+- `payload` 保留事件具体字段
+- `self-improving` 模块只读取自己需要的字段并生成派生事件
+
+### Mapping to Phase 1 Self-Improving Logic
+
+Phase 1 中 `self-improving` 的推导规则建议明确为：
+
+- `message.user_corrected` -> `correction_candidate`
+- `run.completed` + completion heuristics -> `reflection_candidate`
+- `run.failed` / `llm.failed` / `tool.failed` -> `failure_candidate`
+
 ### 1. User Correction Event
 
 触发条件：
@@ -359,12 +439,25 @@ workspace/users/<user_id>/
 
 建议字段：
 - `id`
+- `event_type`
+- `user_id`
+- `session_key`
+- `run_id`
+- `channel`
+- `agent_id`
+- `created_at`
+- `payload`
+
+### DerivedSelfImprovingEvent
+
+建议字段：
+- `id`
 - `module_name`
 - `user_id`
 - `session_key`
 - `run_id`
-- `event_type` (`correction|reflection|failure`)
-- `source_phase`
+- `derived_type` (`correction_candidate|reflection_candidate|failure_candidate`)
+- `source_event_ids`
 - `content`
 - `candidate_lesson`
 - `sensitive`
