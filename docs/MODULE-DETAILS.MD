@@ -896,6 +896,7 @@ REST endpoints for configuration management with DB persistence.
 |---|---|
 | `channels.py` | Channel management REST endpoints |
 | `agent_info.py` | Agent information endpoints |
+| `routes_hooks.py` | Generic hook runtime events, pending items, and decision endpoints |
 | `webhook_dispatch.py` | Inbound webhook routing and dispatch |
 | `channel_hooks.py` | Channel-specific hook triggers |
 | `response_handler.py` | Response normalization across channel types |
@@ -1329,7 +1330,9 @@ Features: BOM handling, CRLF → LF conversion, quote stripping, list parsing (d
 
 **Path**: `app/atlasclaw/hooks/`
 
-Extensible lifecycle hook system with sequential and parallel execution modes.
+Extensible hook capabilities split into two layers:
+- `hooks/system.py` for legacy phase-based interception
+- runtime-first generic hook infrastructure for event dispatch, state persistence, and memory/context sinks
 
 ### 10.1 Hook System (`hooks/system.py`)
 
@@ -1377,6 +1380,101 @@ Extensible lifecycle hook system with sequential and parallel execution modes.
 - `create_session_memory_hook() -> HookDefinition` — Creates session memory flush hook (AGENT_END phase)
 
 ---
+
+### 10.2 Runtime Models (`hooks/runtime_models.py`)
+
+**Enum: `HookEventType`** — Generic runtime lifecycle events.
+
+| Category | Events |
+|---|---|
+| **Run** | `RUN_STARTED`, `RUN_COMPLETED`, `RUN_FAILED` |
+| **Message** | `MESSAGE_RECEIVED`, `MESSAGE_USER_CORRECTED` |
+| **LLM** | `LLM_REQUESTED`, `LLM_COMPLETED`, `LLM_FAILED` |
+| **Tool** | `TOOL_STARTED`, `TOOL_COMPLETED`, `TOOL_FAILED` |
+| **Memory** | `MEMORY_CONFIRMED`, `MEMORY_REJECTED` |
+
+**Dataclasses / Models**:
+- `HookEventEnvelope` — persisted runtime event
+- `PendingHookItem` — item awaiting confirmation or rejection
+- `HookDecisionRecord` — decision audit trail
+- `HookWriteMemoryRequest` — request contract for memory promotion
+- `HookContextInjection` — confirmed context payload returned by `ContextSink`
+
+### 10.3 Runtime Store (`hooks/runtime_store.py`)
+
+**Class: `HookStateStore`**
+
+| Method | Signature | Description |
+|---|---|---|
+| `append_event` | `(module_name, event) -> None` | Append runtime event to `events.jsonl` |
+| `list_events` | `(module_name, user_id) -> list[HookEventEnvelope]` | Read module events for a user |
+| `append_pending` | `(module_name, item) -> None` | Append pending item to `pending.jsonl` |
+| `list_pending` | `(module_name, user_id) -> list[PendingHookItem]` | List unresolved pending items |
+| `resolve_pending` | `(module_name, user_id, pending_id, decision, note) -> PendingHookItem` | Mark pending item confirmed/rejected and write decision log |
+| `list_decisions` | `(module_name, user_id) -> list[HookDecisionRecord]` | Read decision history |
+
+**Storage layout**:
+- `<workspace>/users/<user_id>/hooks/<module_name>/events.jsonl`
+- `<workspace>/users/<user_id>/hooks/<module_name>/pending.jsonl`
+- `<workspace>/users/<user_id>/hooks/<module_name>/decisions.jsonl`
+- `<workspace>/users/<user_id>/hooks/<module_name>/context.jsonl`
+
+### 10.4 Runtime Sinks (`hooks/runtime_sinks.py`)
+
+**Class: `MemorySink`**
+
+| Method | Signature | Description |
+|---|---|---|
+| `write_confirmed` | `(request: HookWriteMemoryRequest) -> HookMemoryWriteResult` | Persist confirmed hook output to `memory_<timestamp>.md` |
+
+**Class: `ContextSink`**
+
+| Method | Signature | Description |
+|---|---|---|
+| `add_injection` | `(module_name, user_id, summary, payload?, source_event_ids?) -> HookContextInjection` | Persist an explicit context injection returned by a hook consumer |
+| `list_confirmed` | `(module_name, user_id) -> list[HookContextInjection]` | Surface confirmed items for future prompt/context use |
+
+### 10.5 Runtime Dispatcher (`hooks/runtime.py`)
+
+**Class: `HookRuntime`**
+
+| Method | Signature | Description |
+|---|---|---|
+| `register` | `(module_name, handler, event_types?) -> None` | Register a built-in runtime handler |
+| `register_script_handler` | `(definition: HookScriptHandlerDefinition) -> None` | Register a config-driven local command script handler |
+| `list_handlers` | `() -> list[HookHandlerDefinition]` | Inspect current registrations |
+| `dispatch` | `(event, module_name?) -> None` | Route event to matching handlers |
+| `emit` | `(**event_fields) -> HookEventEnvelope` | Construct and dispatch an event envelope |
+| `apply_actions` | `(module_name, user_id, source_event_ids, action_batch) -> None` | Apply structured actions returned by a script hook |
+| `create_pending_item` | `(module_name, ...) -> PendingHookItem` | Create a generic pending item for confirmation |
+| `resolve_pending` | `(module_name, user_id, pending_id, decision, note) -> PendingHookItem` | Resolve pending, emit memory events, and optionally write memory |
+
+### 10.6 Script Hook Runner (`hooks/runtime_script.py`)
+
+**Classes**:
+
+- `HookScriptHandlerDefinition` — runtime-ready local command handler definition
+- `HookScriptRunner` — executes local commands, writes envelopes to stdin, parses stdout JSON
+- `HookScriptExecutionError` — raised for invalid JSON, non-zero exit, or timeout
+
+**Supported actions**:
+
+- `create_pending`
+- `write_memory`
+- `add_context`
+
+### 10.7 Built-In Runtime Handlers (`hooks/runtime_builtin.py`)
+
+Phase 1 includes a generic built-in module:
+- `runtime-audit`
+
+Responsibilities:
+- Persist all emitted runtime events for audit/debug visibility
+- Create generic pending items for high-signal events such as `message.user_corrected`,
+  `run.failed`, `llm.failed`, and `tool.failed`
+
+This module exists to exercise the generic runtime end-to-end. It is not a
+special-case skill engine and does not add domain-specific learning semantics to the core.
 
 ## 11. Database Module
 

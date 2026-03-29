@@ -94,6 +94,7 @@ async def execute_agent_run(
             provider_config=provider_config,
             extra={
                 "agent_id": target_agent_id,
+                "run_id": run_id,
                 "context": request_context or {},
             },
         )

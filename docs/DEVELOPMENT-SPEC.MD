@@ -1057,7 +1057,67 @@ async def handler(ctx: RunContext[SkillDeps], param1: str) -> str:
     return "Result"
 ```
 
-### 9.3 Adding a Channel Handler
+### 9.3 Adding a Hook Runtime Consumer
+
+Use the generic hook runtime when a capability needs lifecycle observation,
+pending confirmation, or controlled memory/context integration.
+
+**Core rule**:
+- Keep the core generic
+- Do not add skill-specific event types, pending schemas, or storage layouts to `app/atlasclaw/hooks/`
+
+**What belongs in the hook runtime**:
+- Generic lifecycle events
+- Generic aggregated runtime events such as `run.context_ready`
+- Generic dispatch and registration
+- Generic per-user module state storage
+- Generic memory and context sinks
+- Generic script hook protocol and action application
+
+**What does not belong in the hook runtime**:
+- Module-specific learning logic
+- Skill-specific promotion rules
+- Provider-specific business semantics
+
+**Phase 1 registration pattern**:
+```python
+hook_runtime.register(
+    module_name="runtime-audit",
+    handler=my_handler,
+    event_types={HookEventType.RUN_FAILED, HookEventType.TOOL_FAILED},
+)
+```
+
+**Config-driven script pattern**:
+```json
+{
+  "hooks_runtime": {
+    "script_handlers": [
+      {
+        "module": "runtime-audit-script",
+        "events": ["run.context_ready"],
+        "command": ["python", "scripts/hook_consumer.py"],
+        "timeout_seconds": 10,
+        "enabled": true
+      }
+    ]
+  }
+}
+```
+
+**Script output rules**:
+- Input arrives as `HookEventEnvelope` JSON over `stdin`
+- Output must be JSON with `actions: []`
+- Only generic actions are allowed:
+  - `create_pending`
+  - `write_memory`
+  - `add_context`
+- Script hook failures must not fail the primary agent run
+
+If a skill wants to use hook data, it should consume the runtime as an external capability
+rather than being hard-coded into the core.
+
+### 9.4 Adding a Channel Handler
 
 Implement `ChannelHandler` ABC and register:
 
@@ -1083,7 +1143,7 @@ from app.atlasclaw.channels.registry import ChannelRegistry
 ChannelRegistry.register("my-channel", MyChannelHandler)
 ```
 
-### 9.4 Adding an Auth Provider
+### 9.5 Adding an Auth Provider
 
 Extend `AuthProvider` ABC:
 

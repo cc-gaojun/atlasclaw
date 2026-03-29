@@ -131,6 +131,24 @@ class SkillsConfig(BaseModel):
     )
 
 
+class HookScriptHandlerConfig(BaseModel):
+    """Config-driven local command script hook handler."""
+
+    module: str = Field(description="Stable hook module name")
+    events: list[str] = Field(default_factory=list, description="Subscribed hook event types")
+    command: list[str] = Field(default_factory=list, description="Local executable command")
+    timeout_seconds: int = Field(default=10, ge=1, le=300)
+    enabled: bool = Field(default=False)
+    cwd: Optional[str] = None
+    priority: int = Field(default=100, ge=0)
+
+
+class HooksRuntimeConfig(BaseModel):
+    """Hook runtime extension configuration."""
+
+    script_handlers: list[HookScriptHandlerConfig] = Field(default_factory=list)
+
+
 class WebhookSystemConfig(BaseModel):
     """Per-system webhook access configuration."""
     system_id: str = Field(description="Stable identifier for the external system")
@@ -294,6 +312,7 @@ class AtlasClawConfig(BaseModel):
     skills: SkillsConfig = Field(default_factory=SkillsConfig)
     reset: ResetConfig = Field(default_factory=ResetConfig)
     webhook: WebhookConfig = Field(default_factory=WebhookConfig)
+    hooks_runtime: HooksRuntimeConfig = Field(default_factory=HooksRuntimeConfig)
 
     # Auth configuration — loaded from `auth` section of atlasclaw.json.
     # None means no auth config present; runtime falls back to anonymous mode.

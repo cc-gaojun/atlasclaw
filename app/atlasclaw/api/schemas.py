@@ -145,3 +145,38 @@ class WebhookDispatchRequest(BaseModel):
 class WebhookDispatchResponse(BaseModel):
     status: str
 
+
+class HookDecisionRequest(BaseModel):
+    note: Optional[str] = None
+
+
+class HookEventResponse(BaseModel):
+    id: str
+    event_type: str
+    user_id: str
+    session_key: str
+    run_id: str
+    channel: str
+    agent_id: str
+    created_at: datetime
+    payload: dict[str, Any] = Field(default_factory=dict)
+
+
+class HookPendingResponse(BaseModel):
+    id: str
+    module_name: str
+    user_id: str
+    source_event_ids: list[str] = Field(default_factory=list)
+    summary: str
+    payload: dict[str, Any] = Field(default_factory=dict)
+    status: str
+    created_at: datetime
+    updated_at: datetime
+
+
+class HookDecisionResponse(BaseModel):
+    pending_id: str
+    module_name: str
+    decision: str
+    status: str
+
