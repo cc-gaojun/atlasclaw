@@ -13,37 +13,6 @@ if TYPE_CHECKING:
 
 # Registry entries map tool names to metadata and import targets.
 _TOOL_REGISTRY: dict[str, tuple[ToolMetadata, str, str]] = {
-    # name -> (metadata, module_path, function_name)
-    "exec": (
-        ToolMetadata(name="exec", description="Execute shell command", group="runtime", requires_approval=True),
-        "app.atlasclaw.tools.runtime.exec_tool",
-        "exec_tool",
-    ),
-    "process": (
-        ToolMetadata(name="process", description="Background process management", group="runtime"),
-        "app.atlasclaw.tools.runtime.process_tool",
-        "process_tool",
-    ),
-    "read": (
-        ToolMetadata(name="read", description="Read file content", group="fs"),
-        "app.atlasclaw.tools.filesystem.read_tool",
-        "read_tool",
-    ),
-    "write": (
-        ToolMetadata(name="write", description="Create/overwrite file", group="fs"),
-        "app.atlasclaw.tools.filesystem.write_tool",
-        "write_tool",
-    ),
-    "edit": (
-        ToolMetadata(name="edit", description="Precise string replacement edit", group="fs"),
-        "app.atlasclaw.tools.filesystem.edit_tool",
-        "edit_tool",
-    ),
-    "delete_file": (
-        ToolMetadata(name="delete_file", description="Delete file", group="fs", requires_approval=True),
-        "app.atlasclaw.tools.filesystem.delete_tool",
-        "delete_file_tool",
-    ),
     "browser": (
         ToolMetadata(name="browser", description="Browser automation", group="ui"),
         "app.atlasclaw.tools.ui.browser_tool",

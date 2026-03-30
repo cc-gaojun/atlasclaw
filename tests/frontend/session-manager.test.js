@@ -63,7 +63,7 @@ describe('session-manager.js', () => {
             );
         });
 
-        test('should pass params to createSession', async () => {
+        test('should pass params to create thread session', async () => {
             sessionStorageMock.getItem.mockReturnValueOnce(null);
             global.fetch.mockResolvedValueOnce({
                 ok: true,
@@ -75,7 +75,7 @@ describe('session-manager.js', () => {
             
             // buildApiUrl returns relative path when apiBaseUrl is empty or cross-origin
             expect(global.fetch).toHaveBeenCalledWith(
-                '/api/sessions',
+                expect.stringMatching(/\/api\/sessions\/threads$/),
                 expect.objectContaining({
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' }
@@ -140,16 +140,10 @@ describe('session-manager.js', () => {
     });
 
     describe('startNewSession', () => {
-        test('should reset old session and create new one', async () => {
+        test('should create a new thread and clear stored active key', async () => {
             // First call returns existing key
             sessionStorageMock.getItem.mockReturnValueOnce('old-key');
             
-            // Mock reset call
-            global.fetch.mockResolvedValueOnce({
-                ok: true,
-                json: () => Promise.resolve({ success: true })
-            });
-            // Mock create call
             global.fetch.mockResolvedValueOnce({
                 ok: true,
                 json: () => Promise.resolve({ session_key: 'new-key' })
@@ -164,24 +158,17 @@ describe('session-manager.js', () => {
             sessionStorageMock.getItem.mockReturnValueOnce(null);
             global.fetch.mockResolvedValueOnce({
                 ok: true,
-                json: () => Promise.resolve({ success: true })
-            });
-            global.fetch.mockResolvedValueOnce({
-                ok: true,
                 json: () => Promise.resolve({ session_key: 'brand-new-key' })
             });
             
             await startNewSession();
-            
+
             expect(sessionStorageMock.removeItem).toHaveBeenCalled();
         });
 
-        test('should handle reset failure gracefully', async () => {
+        test('should still resolve when creating another thread after existing session', async () => {
             sessionStorageMock.getItem.mockReturnValueOnce('old-key');
             
-            // Mock reset failure
-            global.fetch.mockRejectedValueOnce(new Error('Reset failed'));
-            // Mock create success
             global.fetch.mockResolvedValueOnce({
                 ok: true,
                 json: () => Promise.resolve({ session_key: 'new-key' })
@@ -196,7 +183,6 @@ describe('session-manager.js', () => {
                 json: () => Promise.resolve({ session_key: 'another-new-key' })
             });
             
-            // Should not throw
             await expect(startNewSession()).resolves.toBeDefined();
         });
     });

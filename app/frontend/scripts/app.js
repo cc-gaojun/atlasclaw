@@ -10,7 +10,8 @@ import { installAuthFetchInterceptor, checkAuth } from './auth.js'
 import { loadConfig } from './config.js'
 import { initI18n, updatePageTranslations, updateContainerTranslations } from './i18n.js'
 import { renderSidebar, updateSidebarActive } from './components/sidebar.js'
-import { renderHeader, updateHeaderTitle } from './components/header.js'
+import { renderHeader, updateHeaderTitle, updateHeaderTitleText } from './components/header.js'
+import { getAgentInfo } from './api-client.js'
 
 /**
  * Route table - lazy loaded page modules
@@ -49,6 +50,7 @@ const routes = [
 
 // Store auth info globally for components that need it
 let currentAuthInfo = null
+let currentAgentInfo = null
 
 /**
  * Get current authenticated user info
@@ -86,6 +88,14 @@ export async function initApp() {
       // Continue without i18n
     }
 
+    // 4.1 Load agent display metadata for chat UI shell
+    try {
+      currentAgentInfo = await getAgentInfo()
+    } catch (agentInfoError) {
+      console.warn('[App] Failed to load agent info:', agentInfoError)
+      currentAgentInfo = null
+    }
+
     // 5. Render layout (sidebar + header)
     const sidebarContainer = document.getElementById('sidebar')
     const headerContainer = document.getElementById('app-header')
@@ -95,7 +105,10 @@ export async function initApp() {
     }
 
     if (headerContainer) {
-      renderHeader(headerContainer)
+      renderHeader(headerContainer, { authInfo })
+      if (currentAgentInfo?.name) {
+        updateHeaderTitleText(currentAgentInfo.name)
+      }
     }
 
     updatePageTranslations()
@@ -109,7 +122,9 @@ export async function initApp() {
       onBeforeRoute: (path, route) => {
         updateSidebarActive(path)
         // Update header title
-        if (route && route.title) {
+        if (path === '/' && currentAgentInfo?.name) {
+          updateHeaderTitleText(currentAgentInfo.name)
+        } else if (route && route.title) {
           updateHeaderTitle(route.title)
         }
       },
@@ -144,6 +159,12 @@ function setupLinkInterception() {
 
     const href = link.getAttribute('href')
 
+    if (link.classList.contains('new-chat-btn')) {
+      e.preventDefault()
+      handleNewChatClick()
+      return
+    }
+
     // Skip navigation for:
     // - Empty or no href
     // - External links (http://, https://, //)
@@ -166,6 +187,16 @@ function setupLinkInterception() {
     e.preventDefault()
     window.__spaRouter?.navigate(href)
   })
+}
+
+async function handleNewChatClick() {
+  try {
+    const { startNewSession } = await import('./session-manager.js')
+    await startNewSession(true, { channel: 'web', chatType: 'dm' })
+    window.__spaRouter?.navigate('/', { replace: window.location.pathname === '/' })
+  } catch (error) {
+    console.error('[App] Failed to start new chat:', error)
+  }
 }
 
 /**

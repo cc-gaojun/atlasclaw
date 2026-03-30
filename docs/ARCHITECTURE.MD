@@ -150,9 +150,25 @@ A single agent instance serves multiple access channels simultaneously (REST API
 | **Auth Middleware** | Credential extraction, provider authentication, shadow user resolution | `auth/middleware.py`, `auth/strategy.py` |
 | **Agent Engine** | LLM orchestration, prompt construction, streaming, context compaction, token management, agent instance pooling | `agent/runner.py`, `agent/prompt_builder.py`, `agent/token_policy.py`, `agent/agent_pool.py`, `core/token_pool.py`, `core/token_health_store.py`, `core/token_interceptor.py` |
 | **Tools & Skills** | Executable capabilities exposed to the LLM | `tools/`, `skills/` |
-| **Hooks** | Lifecycle interception for cross-cutting concerns | `hooks/system.py` |
+| **Hooks** | Lifecycle interception plus generic runtime event dispatch, per-user hook state, and memory/context sinks | `hooks/system.py`, `hooks/runtime.py` |
 | **Core Infrastructure** | Configuration, dependency injection, workspace, tenancy | `core/` |
 | **Data & State** | Persistence for sessions, memory, users, channels, token health | `session/`, `memory/`, `auth/shadow_store.py` |
+
+### Session Scope Model
+
+AtlasClaw uses a canonical `SessionKey` to separate session ownership from conversation scope:
+
+- `user_id`: the AtlasClaw user that owns the persisted session bucket
+- `channel` + `account_id`: the ingress surface and concrete channel connection
+- `chat_type` + `peer_id`: the external conversation scope
+- `thread_id`: an optional independent thread inside the same scope
+
+Runtime rules:
+
+- Web chat creates independent threads through `POST /api/sessions/threads`
+- Channel direct messages are isolated by external sender
+- Channel group chats are shared by group or conversation ID
+- Metadata and transcripts persist under `workspace/users/<user_id>/sessions/`
 
 ---
 
@@ -223,8 +239,8 @@ app/atlasclaw/
 │   ├── catalog.py                 # ToolProfile, ToolCatalog, tool groups
 │   ├── registration.py            # register_builtin_tools()
 │   ├── base.py                    # Tool base classes
-│   ├── filesystem/                # read, write, edit, delete_file
-│   ├── runtime/                   # exec, process
+│   ├── filesystem/                # legacy file tools (disabled by default)
+│   ├── runtime/                   # legacy runtime tools (disabled by default)
 │   ├── memory/                    # memory_search, memory_get
 │   ├── sessions/                  # list, history, send, spawn, status, subagents
 │   ├── web/                       # web_search, web_fetch
@@ -323,7 +339,7 @@ create_app() → FastAPI(lifespan=lifespan)
 The `lifespan()` async context manager executes this ordered sequence:
 
 1. **Load configuration** — `ConfigManager.load()` reads `atlasclaw.json`/`atlasclaw.yaml` with environment variable interpolation
-2. **Initialize workspace** — `WorkspaceInitializer.initialize()` creates the `.atlasclaw/` directory tree (user data only)
+2. **Initialize workspace** — `WorkspaceInitializer.initialize()` creates the `.atlasclaw/` directory tree and copies the default `agents/main/` files from the repo template directory when they are missing
 3. **Register built-in channel handlers** — Feishu, DingTalk, WeCom handlers registered in `ChannelRegistry`
 4. **Initialize ChannelManager** — Creates `ChannelManager` with workspace path
 5. **Scan providers** — `ProviderScanner` walks the providers directory (outside workspace), discovers auth and channel extensions
@@ -708,6 +724,40 @@ HookDefinition(
 
 Hook handler signature: `async (context: dict) -> Optional[dict]`
 
+### 9.6 Hook Runtime Extension
+
+AtlasClaw also provides a runtime-first hook layer aligned with OpenClaw-style
+event capture. This layer is generic by design: it dispatches lifecycle events,
+stores per-user module state, and exposes memory/context sinks without baking
+skill-specific semantics into the core.
+
+**Core components**:
+- `HookRuntime` — dispatches typed runtime events to registered handlers
+- `HookStateStore` — persists per-user, per-module hook state
+- `MemorySink` — writes confirmed items into long-term memory files
+- `ContextSink` — exposes confirmed items for future prompt/context integration
+
+**Runtime event taxonomy**:
+- `run.started`, `run.completed`, `run.failed`
+- `run.context_ready`
+- `message.received`, `message.user_corrected`
+- `llm.requested`, `llm.completed`, `llm.failed`
+- `tool.started`, `tool.completed`, `tool.failed`
+- `memory.confirmed`, `memory.rejected`
+
+**Phase 1 registration model**:
+- Hook runtime handlers are registered in-process during bootstrap
+- Core remains generic: no skill-specific event types or module semantics are baked in
+- Skills or providers may consume the runtime later, but they are not part of the core contract
+
+**Script hook support**:
+- Config-driven local executable commands may subscribe through `hooks_runtime.script_handlers`
+- Commands receive event envelopes over `stdin`
+- Commands may emit structured `stdout` JSON actions:
+  - `create_pending`
+  - `write_memory`
+  - `add_context`
+
 ---
 
 ## 10. Streaming & Real-Time Communication
@@ -773,13 +823,30 @@ Configurable via `BlockChunkerConfig`, controls how streaming text is chunked fo
 
 **Search**: Hybrid search combining keyword matching and semantic similarity.
 
-### 11.3 Users
+Confirmed runtime output may also be promoted into timestamped long-term memory
+documents such as `memory_<timestamp>.md` under the same per-user memory
+directory.
+
+### 11.3 Hook Runtime State
+
+**Format**: JSONL
+**Location**: `<workspace>/users/<user_id>/hooks/<module_name>/`
+**Files**:
+- `events.jsonl` — Observed runtime lifecycle events
+- `pending.jsonl` — Items awaiting explicit confirmation or rejection
+- `decisions.jsonl` — Confirmation/rejection history
+
+**Isolation**:
+- State is scoped by authenticated AtlasClaw `user_id`
+- Hook modules do not share files unless they intentionally use the same module name
+
+### 11.4 Users
 
 **Format**: JSON
 **Location**: `~/.atlasclaw/users.json`
 **Content**: Shadow user mappings (`provider:subject` → `user_id` → `ShadowUser`)
 
-### 11.4 Configuration
+### 11.5 Configuration
 
 **Format**: JSON or YAML
 **Locations**: 
@@ -788,7 +855,7 @@ Configurable via `BlockChunkerConfig`, controls how streaming text is chunked fo
 - User home (`~/.atlasclaw/config.json`) — Global user configuration
 - Per-user (`<workspace>/users/<user_id>/user_setting.json`) — User-specific settings (channels, preferences)
 
-### 11.5 Token Health
+### 11.6 Token Health
 
 **Format**: JSON
 **Location**: `<workspace>/token_health.json`
@@ -806,7 +873,7 @@ Configurable via `BlockChunkerConfig`, controls how streaming text is chunked fo
 }
 ```
 
-### 11.6 Relational Database (Enterprise)
+### 11.7 Relational Database (Enterprise)
 
 **Tables** (SQLAlchemy ORM models in `app/atlasclaw/db/models.py`):
 
@@ -834,7 +901,7 @@ Configurable via `BlockChunkerConfig`, controls how streaming text is chunked fo
 - Tokens: DB entries override JSON entries with same `token_id`
 - Provider instances: DB entries override JSON entries with same `(provider_type, instance_name)`
 
-### 11.6 Data Encryption
+### 11.8 Data Encryption
 
 All sensitive data is encrypted at rest using **AES-256-GCM**:
 
@@ -858,7 +925,7 @@ All sensitive data is encrypted at rest using **AES-256-GCM**:
 - API returns plaintext values (decrypted automatically)
 - Lazy migration: legacy unencrypted data is read as-is
 
-### 11.7 Database Initialization
+### 11.9 Database Initialization
 
 **SQLite Mode** (default):
 - Schema auto-created via `Base.metadata.create_all()` on startup

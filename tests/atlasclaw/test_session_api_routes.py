@@ -5,47 +5,33 @@ from __future__ import annotations
 import pytest
 from urllib.parse import quote
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.atlasclaw.api.routes import APIContext, create_router, set_api_context
 from app.atlasclaw.auth.models import UserInfo
+from app.atlasclaw.session.context import SessionKey, TranscriptEntry
 from app.atlasclaw.session.manager import SessionManager
 from app.atlasclaw.session.queue import SessionQueue
 from app.atlasclaw.session.context import ChatType, SessionScope
 from app.atlasclaw.skills.registry import SkillRegistry
 
 
-# Default test user ID used by SessionManager when no user_id is specified
-DEFAULT_TEST_USER_ID = "default"
-
-
-class MockAuthMiddleware(BaseHTTPMiddleware):
-    """Middleware that sets a mock authenticated user on request.state."""
-    
-    def __init__(self, app, user_id: str = DEFAULT_TEST_USER_ID):
-        super().__init__(app)
-        self.user_id = user_id
-    
-    async def dispatch(self, request: Request, call_next):
-        request.state.user_info = UserInfo(
-            user_id=self.user_id,
-            display_name="Test User",
-        )
-        return await call_next(request)
-
-
-def _build_client(tmp_path, user_id: str = DEFAULT_TEST_USER_ID) -> TestClient:
+def _build_client(tmp_path, user_id: str = "default") -> TestClient:
     ctx = APIContext(
-        session_manager=SessionManager(agents_dir=str(tmp_path / "agents")),
+        session_manager=SessionManager(workspace_path=str(tmp_path), user_id="default"),
         session_queue=SessionQueue(),
         skill_registry=SkillRegistry(),
     )
     set_api_context(ctx)
 
     app = FastAPI()
-    app.add_middleware(MockAuthMiddleware, user_id=user_id)
+
+    @app.middleware("http")
+    async def inject_user_info(request, call_next):
+        request.state.user_info = UserInfo(user_id=user_id, display_name=user_id)
+        return await call_next(request)
+
     app.include_router(create_router())
     return TestClient(app)
 
@@ -56,6 +42,8 @@ def test_session_routes_use_current_session_manager_interface(tmp_path):
     create_response = client.post("/api/sessions", json={})
     assert create_response.status_code == 200
     session_key = create_response.json()["session_key"]
+    assert create_response.json()["title"] == ""
+    assert create_response.json()["title_status"] == "empty"
     encoded_session_key = quote(session_key, safe="")
 
     get_response = client.get(f"/api/sessions/{encoded_session_key}")
@@ -171,3 +159,120 @@ class TestSessionCreateWithChatType:
         )
         assert response2.status_code == 200
         assert ":channel:" in response2.json()["session_key"]
+
+
+class TestThreadSessionsAndOwnership:
+
+    @pytest.mark.asyncio
+    async def test_list_sessions_returns_all_current_user_sessions_across_channels(self, tmp_path):
+        alice_manager = SessionManager(workspace_path=str(tmp_path), user_id="alice")
+        bob_manager = SessionManager(workspace_path=str(tmp_path), user_id="bob")
+
+        await alice_manager.get_or_create("agent:main:user:alice:web:dm:alice:topic:web-thread-1")
+        await alice_manager.get_or_create("agent:main:user:alice:feishu:dm:feishu-user-1")
+        await bob_manager.get_or_create("agent:main:user:bob:web:dm:bob:topic:bob-thread-1")
+
+        client = _build_client(tmp_path, user_id="alice")
+        response = client.get("/api/sessions")
+
+        assert response.status_code == 200
+        session_keys = [item["session_key"] for item in response.json()]
+        assert "agent:main:user:alice:web:dm:alice:topic:web-thread-1" in session_keys
+        assert "agent:main:user:alice:feishu:dm:feishu-user-1" in session_keys
+        assert "agent:main:user:bob:web:dm:bob:topic:bob-thread-1" not in session_keys
+
+    def test_create_thread_session_returns_distinct_thread_keys(self, tmp_path):
+        client = _build_client(tmp_path, user_id="alice")
+
+        first = client.post("/api/sessions/threads", json={"channel": "web", "chat_type": "dm"})
+        second = client.post("/api/sessions/threads", json={"channel": "web", "chat_type": "dm"})
+
+        assert first.status_code == 200
+        assert second.status_code == 200
+
+        first_key = SessionKey.from_string(first.json()["session_key"])
+        second_key = SessionKey.from_string(second.json()["session_key"])
+
+        assert first_key.user_id == "alice"
+        assert second_key.user_id == "alice"
+        assert first_key.thread_id
+        assert second_key.thread_id
+        assert first.json()["session_key"] != second.json()["session_key"]
+
+    @pytest.mark.asyncio
+    async def test_get_session_history_returns_persisted_transcript_entries(self, tmp_path):
+        alice_manager = SessionManager(workspace_path=str(tmp_path), user_id="alice")
+        session_key = "agent:main:user:alice:web:dm:alice:topic:web-thread-1"
+        await alice_manager.get_or_create(session_key)
+        await alice_manager.append_transcript(
+            session_key,
+            TranscriptEntry(role="system", content="hidden system"),
+        )
+        await alice_manager.append_transcript(
+            session_key,
+            TranscriptEntry(role="user", content="hello atlas"),
+        )
+        await alice_manager.append_transcript(
+            session_key,
+            TranscriptEntry(role="assistant", content="hi there"),
+        )
+        await alice_manager.append_transcript(
+            session_key,
+            TranscriptEntry(role="tool", content="internal tool output"),
+        )
+
+        client = _build_client(tmp_path, user_id="alice")
+        encoded_session_key = quote(session_key, safe="")
+
+        response = client.get(f"/api/sessions/{encoded_session_key}/history")
+
+        assert response.status_code == 200
+        assert response.json()["messages"] == [
+            {
+                "role": "user",
+                "content": "hello atlas",
+                "timestamp": response.json()["messages"][0]["timestamp"],
+            },
+            {
+                "role": "assistant",
+                "content": "hi there",
+                "timestamp": response.json()["messages"][1]["timestamp"],
+            },
+        ]
+
+    @pytest.mark.parametrize(
+        ("method", "path_template", "payload"),
+        [
+            ("get", "/api/sessions/{key}", None),
+            ("get", "/api/sessions/{key}/history", None),
+            ("post", "/api/sessions/{key}/reset", {"archive": True}),
+            ("get", "/api/sessions/{key}/status", None),
+            ("post", "/api/sessions/{key}/queue", {"mode": "steer"}),
+            ("post", "/api/sessions/{key}/compact", {}),
+            ("delete", "/api/sessions/{key}", None),
+        ],
+    )
+    def test_direct_session_routes_reject_other_users_session_keys(
+        self,
+        tmp_path,
+        method,
+        path_template,
+        payload,
+    ):
+        owner_client = _build_client(tmp_path, user_id="bob")
+        create_response = owner_client.post(
+            "/api/sessions",
+            json={"channel": "web", "scope": "per-peer"},
+        )
+        assert create_response.status_code == 200
+        owner_session_key = create_response.json()["session_key"]
+        encoded_session_key = quote(owner_session_key, safe="")
+
+        attacker_client = _build_client(tmp_path, user_id="alice")
+        kwargs = {"json": payload} if payload is not None else {}
+        response = getattr(attacker_client, method)(
+            path_template.format(key=encoded_session_key),
+            **kwargs,
+        )
+
+        assert response.status_code == 404

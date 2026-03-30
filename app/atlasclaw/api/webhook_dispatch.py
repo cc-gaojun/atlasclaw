@@ -145,7 +145,7 @@ def build_webhook_user_message(skill_entry: MdSkillEntry, payload: dict, system_
         f"Target markdown skill: {skill_entry.qualified_name}\n"
         f"Skill file path: {skill_entry.file_path}\n"
         f"Calling system: {system_id}\n"
-        "You must read the target SKILL.md first and follow only that skill.\n"
+        "You must follow only the targeted markdown skill and prefer any executable tool already registered for it.\n"
         "Do not choose a different skill.\n"
         "Treat the JSON below as the complete machine-provided business input.\n"
         "Return a single structured JSON result.\n\n"

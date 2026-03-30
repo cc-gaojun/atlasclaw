@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
 """Channel manager for managing channel connections."""
 
 from __future__ import annotations
@@ -13,11 +13,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from .handler import ChannelHandler
 from .models import ChannelConnection, InboundMessage, OutboundMessage
 from .registry import ChannelRegistry
+from app.atlasclaw.auth.models import UserInfo
 from app.atlasclaw.db.orm.channel_config import ChannelConfigService
+from app.atlasclaw.session.context import ChatType, SessionKey, SessionScope
 
 if TYPE_CHECKING:
     from app.atlasclaw.agent.runner import AgentRunner
     from app.atlasclaw.core.deps import SkillDeps
+    from app.atlasclaw.session.router import SessionManagerRouter
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +37,7 @@ class ChannelManager:
         self._workspace_path = workspace_path
         self._active_connections: Dict[str, ChannelHandler] = {}
         self._agent_runner: Optional["AgentRunner"] = None
+        self._session_manager_router: Optional["SessionManagerRouter"] = None
         self._event_loop: Optional[asyncio.AbstractEventLoop] = None
     
     def set_agent_runner(self, agent_runner: "AgentRunner") -> None:
@@ -48,6 +52,10 @@ class ChannelManager:
             self._event_loop = asyncio.get_running_loop()
         except RuntimeError:
             self._event_loop = None
+
+    def set_session_manager_router(self, session_manager_router: "SessionManagerRouter") -> None:
+        """Set the per-user session manager router used by channel traffic."""
+        self._session_manager_router = session_manager_router
 
     async def initialize_connection(
         self,
@@ -192,24 +200,34 @@ class ChannelManager:
                 logger.error(f"[ChannelManager] No handler found for {instance_key}")
                 return
             
-            # Create session key
-            session_key = f"channel:{channel_type}:{connection_id}:{message.chat_id}"
-            
-            # Import SkillDeps locally to avoid circular imports
             from app.atlasclaw.core.deps import SkillDeps
-            from app.atlasclaw.auth.models import UserInfo
-            
-            # 使用连接所有者的 user_id，而非匿名用户
+
             user_info = UserInfo(user_id=user_id, display_name=user_id.capitalize())
-            
+            session_key = self._build_channel_session_key(
+                owner_user_id=user_id,
+                channel_type=channel_type,
+                connection_id=connection_id,
+                message=message,
+            )
+            scoped_session_manager = (
+                self._session_manager_router.for_user(user_id)
+                if self._session_manager_router is not None
+                else None
+            )
+
             deps = SkillDeps(
                 user_info=user_info,
-                peer_id=message.sender_id,
+                peer_id=self._resolve_peer_id(message),
                 session_key=session_key,
                 channel=channel_type,
-                extra={},
+                session_manager=scoped_session_manager,
+                extra={
+                    "channel_connection_id": connection_id,
+                    "external_sender_id": message.sender_id,
+                    "external_chat_id": message.chat_id,
+                    "external_chat_type": self._resolve_chat_type(message).value,
+                },
             )
-            
             # Collect response from agent
             response_text = ""
             event_count = 0
@@ -253,6 +271,55 @@ class ChannelManager:
                 
         except Exception as e:
             logger.error(f"[ChannelManager] Error processing message: {e}", exc_info=True)
+
+
+    def _resolve_chat_type(self, message: InboundMessage) -> ChatType:
+        """Map provider-specific metadata to canonical chat types."""
+        metadata = message.metadata or {}
+        raw_type = (
+            metadata.get("chat_type")
+            or metadata.get("conversation_type")
+            or metadata.get("conversationType")
+            or ""
+        )
+        raw_type = str(raw_type).strip().lower()
+        if raw_type in {"group", "groupchat", "chat", "2"}:
+            return ChatType.GROUP
+        if raw_type in {"channel"}:
+            return ChatType.CHANNEL
+        if raw_type in {"thread"}:
+            return ChatType.THREAD
+        if raw_type in {"p2p", "single", "im", "1", "private"}:
+            return ChatType.DM
+        if message.chat_id and message.chat_id != message.sender_id:
+            return ChatType.GROUP
+        return ChatType.DM
+
+    def _resolve_peer_id(self, message: InboundMessage) -> str:
+        """Return the peer identity that should own the conversation state."""
+        chat_type = self._resolve_chat_type(message)
+        if chat_type in {ChatType.GROUP, ChatType.CHANNEL, ChatType.THREAD}:
+            return message.chat_id or message.sender_id or "default"
+        return message.sender_id or message.chat_id or "default"
+
+    def _build_channel_session_key(
+        self,
+        *,
+        owner_user_id: str,
+        channel_type: str,
+        connection_id: str,
+        message: InboundMessage,
+    ) -> str:
+        """Build canonical session keys for inbound channel traffic."""
+        key = SessionKey(
+            agent_id="main",
+            user_id=owner_user_id,
+            channel=channel_type,
+            account_id=connection_id,
+            chat_type=self._resolve_chat_type(message),
+            peer_id=self._resolve_peer_id(message),
+        )
+        return key.to_string(scope=SessionScope.PER_ACCOUNT_CHANNEL_PEER)
 
     async def stop_connection(
         self,

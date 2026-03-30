@@ -3,7 +3,7 @@
  * Manage session lifecycle and persistence
  */
 
-import { createSession, resetSession } from './api-client.js';
+import { createThreadSession } from './api-client.js';
 
 const SESSION_KEY_STORAGE = 'atlasclaw_session_key';
 
@@ -26,7 +26,7 @@ export async function initSession(params = {}) {
     }
     
     // Create new session
-    const session = await createSession(params);
+    const session = await createThreadSession(params);
     currentSessionKey = session.session_key;
     sessionStorage.setItem(SESSION_KEY_STORAGE, currentSessionKey);
     console.log('[Session] Created:', currentSessionKey);
@@ -67,27 +67,17 @@ export function hasSession() {
 }
 
 /**
- * Clear current session and create new one
- * @param {boolean} archive - Whether to archive old session
+ * Clear current session and create a new independent thread
+ * @param {boolean} archive - Unused compatibility argument
  * @param {object} params - New session parameters
  * @returns {Promise<string>} New session key
  */
 export async function startNewSession(archive = true, params = {}) {
-    // Reset old session
-    if (currentSessionKey) {
-        try {
-            await resetSession(currentSessionKey, archive);
-            console.log('[Session] Reset old session:', currentSessionKey);
-        } catch (e) {
-            console.warn('[Session] Failed to reset:', e.message);
-        }
-    }
-    
-    // Clear storage
+    // Clear storage and create a brand-new thread while preserving history entries
+    void archive;
     sessionStorage.removeItem(SESSION_KEY_STORAGE);
     currentSessionKey = null;
-    
-    // Create new session
+
     return initSession(params);
 }
 

@@ -9,7 +9,42 @@ from typing import Any, Dict
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
+from app.atlasclaw.core.config import get_config
+
 router = APIRouter(prefix="/api/agent", tags=["agent"])
+
+
+def _get_agent_definition_dir() -> Path:
+    """Resolve the main agent definition directory from the active workspace config."""
+    workspace_path = Path(get_config().workspace.path).expanduser()
+    return workspace_path / "agents" / "main"
+
+
+def _clean_scalar(value: str) -> str:
+    cleaned = value.strip()
+    if len(cleaned) >= 2 and cleaned[0] == cleaned[-1] and cleaned[0] in {'"', "'"}:
+        return cleaned[1:-1].strip()
+    return cleaned
+
+
+def _normalize_section_key(title: str) -> str:
+    return title.strip().lower().replace(" ", "_")
+
+
+def _first_paragraph(lines: list[str]) -> str:
+    paragraph_lines: list[str] = []
+    for raw_line in lines:
+        line = raw_line.strip()
+        if not line:
+            if paragraph_lines:
+                break
+            continue
+        if line.startswith("- "):
+            if paragraph_lines:
+                break
+            continue
+        paragraph_lines.append(line)
+    return " ".join(paragraph_lines).strip()
 
 
 class AgentInfoResponse(BaseModel):
@@ -28,9 +63,9 @@ async def get_agent_info() -> AgentInfoResponse:
         Agent information with welcome message
     """
     try:
-        # Load main agent SOUL.md
-        soul_path = Path(".atlasclaw/agents/main/SOUL.md")
-        identity_path = Path(".atlasclaw/agents/main/IDENTITY.md")
+        agent_dir = _get_agent_definition_dir()
+        soul_path = agent_dir / "SOUL.md"
+        identity_path = agent_dir / "IDENTITY.md"
         
         soul_data = _parse_soul_md(soul_path.read_text(encoding="utf-8")) if soul_path.exists() else {}
         identity_data = _parse_identity_md(identity_path.read_text(encoding="utf-8")) if identity_path.exists() else {}
@@ -43,7 +78,12 @@ async def get_agent_info() -> AgentInfoResponse:
         welcome_parts.append(f"Hello! I'm {name}.")
         
         # Add description
-        description = soul_data.get("description", identity_data.get("description", ""))
+        description = (
+            soul_data.get("description", "")
+            or soul_data.get("system_prompt_summary", "")
+            or identity_data.get("role_positioning_summary", "")
+            or identity_data.get("description", "")
+        )
         if description:
             welcome_parts.append(description)
         
@@ -74,45 +114,40 @@ def _parse_soul_md(content: str) -> Dict[str, Any]:
     Returns:
         Parsed data dictionary
     """
-    data = {}
-    current_section = None
-    current_list = []
-    
-    for line in content.split("\n"):
-        line = line.strip()
-        
-        # Skip empty lines
-        if not line:
+    data: Dict[str, Any] = {}
+    sections: dict[str, list[str]] = {}
+    current_section: str | None = None
+    in_frontmatter = False
+
+    for idx, raw_line in enumerate(content.splitlines()):
+        line = raw_line.strip()
+
+        if idx == 0 and line == "---":
+            in_frontmatter = True
             continue
-        
-        # Parse headers
+        if in_frontmatter:
+            if line == "---":
+                in_frontmatter = False
+                continue
+            if ":" in line:
+                key, value = line.split(":", 1)
+                data[_normalize_section_key(key)] = _clean_scalar(value)
+            continue
+
         if line.startswith("# "):
-            data["name"] = line[2:].strip()
-        elif line.startswith("## "):
-            # Save previous section if it was a list
-            if current_section and current_list:
-                data[current_section] = current_list
-                current_list = []
-            
-            current_section = line[3:].strip().lower().replace(" ", "_")
-        
-        # Parse list items
-        elif line.startswith("- "):
-            item = line[2:].strip()
-            if current_section:
-                current_list.append(item)
-        
-        # Parse key-value pairs
-        elif ":" in line and not line.startswith("#"):
-            key, value = line.split(":", 1)
-            key = key.strip().lower().replace(" ", "_")
-            value = value.strip()
-            data[key] = value
-    
-    # Save last section if it was a list
-    if current_section and current_list:
-        data[current_section] = current_list
-    
+            continue
+        if line.startswith("## "):
+            current_section = _normalize_section_key(line[3:])
+            sections.setdefault(current_section, [])
+            continue
+        if current_section:
+            sections.setdefault(current_section, []).append(raw_line.rstrip())
+
+    for section_name, lines in sections.items():
+        summary = _first_paragraph(lines)
+        if summary:
+            data[f"{section_name}_summary"] = summary
+
     return data
 
 
@@ -125,19 +160,38 @@ def _parse_identity_md(content: str) -> Dict[str, Any]:
     Returns:
         Parsed data dictionary
     """
-    data = {}
-    
-    for line in content.split("\n"):
-        line = line.strip()
-        
+    data: Dict[str, Any] = {}
+    sections: dict[str, list[str]] = {}
+    current_section: str | None = None
+    in_frontmatter = False
+
+    for idx, raw_line in enumerate(content.splitlines()):
+        line = raw_line.strip()
+
+        if idx == 0 and line == "---":
+            in_frontmatter = True
+            continue
+        if in_frontmatter:
+            if line == "---":
+                in_frontmatter = False
+                continue
+            if ":" in line:
+                key, value = line.split(":", 1)
+                data[_normalize_section_key(key)] = _clean_scalar(value)
+            continue
+
         if line.startswith("# "):
-            data["name"] = line[2:].strip()
-        elif line.startswith("## "):
-            pass  # Section headers
-        elif ":" in line and not line.startswith("#"):
-            key, value = line.split(":", 1)
-            key = key.strip().lower().replace(" ", "_")
-            value = value.strip()
-            data[key] = value
-    
+            continue
+        if line.startswith("## "):
+            current_section = _normalize_section_key(line[3:])
+            sections.setdefault(current_section, [])
+            continue
+        if current_section:
+            sections.setdefault(current_section, []).append(raw_line.rstrip())
+
+    for section_name, lines in sections.items():
+        summary = _first_paragraph(lines)
+        if summary:
+            data[f"{section_name}_summary"] = summary
+
     return data

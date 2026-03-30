@@ -34,6 +34,7 @@ from app.atlasclaw.api.agent_info import router as agent_info_router
 from app.atlasclaw.api.api_routes import router as db_api_router
 from app.atlasclaw.session.manager import SessionManager
 from app.atlasclaw.session.queue import SessionQueue
+from app.atlasclaw.session.router import SessionManagerRouter
 from app.atlasclaw.skills.registry import SkillRegistry
 from app.atlasclaw.tools.registration import register_builtin_tools
 from app.atlasclaw.tools.catalog import ToolProfile
@@ -53,6 +54,12 @@ from app.atlasclaw.channels.handlers.wecom import WeComHandler
 from app.atlasclaw.auth import AuthRegistry
 from app.atlasclaw.agent.agent_pool import AgentInstancePool
 from app.atlasclaw.agent.token_policy import DynamicTokenPolicy
+from app.atlasclaw.hooks.runtime import HookRuntime, HookRuntimeContext
+from app.atlasclaw.hooks.runtime_builtin import register_builtin_hook_handlers
+from app.atlasclaw.hooks.runtime_models import HookEventType
+from app.atlasclaw.hooks.runtime_script import HookScriptHandlerDefinition
+from app.atlasclaw.hooks.runtime_sinks import ContextSink, MemorySink
+from app.atlasclaw.hooks.runtime_store import HookStateStore
 from app.atlasclaw.core.token_health_store import TokenHealthStore
 from app.atlasclaw.core.token_interceptor import TokenHealthInterceptor
 from app.atlasclaw.core.token_pool import TokenEntry, TokenPool
@@ -87,17 +94,22 @@ _global_provider_registry: Optional[ServiceProviderRegistry] = None
 
 # Global context components
 _session_manager: Optional[SessionManager] = None
+_session_manager_router: Optional[SessionManagerRouter] = None
 _session_queue: Optional[SessionQueue] = None
 _skill_registry: Optional[SkillRegistry] = None
 _agent_runner: Optional[AgentRunner] = None
 _channel_manager: Optional[ChannelManager] = None
+_hook_state_store: Optional[HookStateStore] = None
+_memory_sink: Optional[MemorySink] = None
+_context_sink: Optional[ContextSink] = None
+_hook_runtime: Optional[HookRuntime] = None
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
 
 
     """Application lifespan handler for startup and shutdown."""
-    global _session_manager, _session_queue, _skill_registry, _agent_runner, _global_provider_registry, _channel_manager
+    global _session_manager, _session_manager_router, _session_queue, _skill_registry, _agent_runner, _global_provider_registry, _channel_manager, _hook_state_store, _memory_sink, _context_sink, _hook_runtime
     
     config = get_config()
     config_path = get_config_path()
@@ -119,8 +131,9 @@ async def lifespan(app: FastAPI):
     
     # Initialize workspace directory structure
     workspace_initializer = WorkspaceInitializer(workspace_path)
-    if not workspace_initializer.is_initialized():
-        workspace_initializer.initialize()
+    was_initialized = workspace_initializer.is_initialized()
+    workspace_initializer.initialize()
+    if not was_initialized:
         print(f"[AtlasClaw] Initialized workspace at: {workspace_path}")
 
     check_and_prompt_for_providers(providers_root)
@@ -211,8 +224,37 @@ async def lifespan(app: FastAPI):
         daily_reset_hour=config.reset.daily_hour,
         idle_reset_minutes=config.reset.idle_minutes,
     )
+    _session_manager_router = SessionManagerRouter.from_manager(_session_manager)
     _session_queue = SessionQueue(max_concurrent=config.agent_defaults.max_concurrent)
-    _skill_registry = SkillRegistry()
+    _hook_state_store = HookStateStore(workspace_path=workspace_path)
+    _memory_sink = MemorySink(workspace_path=workspace_path)
+    _context_sink = ContextSink(_hook_state_store)
+    _hook_runtime = HookRuntime(
+        HookRuntimeContext(
+            workspace_path=workspace_path,
+            hook_state_store=_hook_state_store,
+            memory_sink=_memory_sink,
+            context_sink=_context_sink,
+            session_manager_router=_session_manager_router,
+        )
+    )
+    register_builtin_hook_handlers(_hook_runtime)
+    for handler_config in config.hooks_runtime.script_handlers:
+        event_types = {HookEventType(event_name) for event_name in handler_config.events}
+        _hook_runtime.register_script_handler(
+            HookScriptHandlerDefinition(
+                module_name=handler_config.module,
+                event_types=event_types,
+                command=list(handler_config.command),
+                timeout_seconds=handler_config.timeout_seconds,
+                enabled=handler_config.enabled,
+                cwd=handler_config.cwd,
+                priority=handler_config.priority,
+            )
+        )
+    _skill_registry = SkillRegistry(
+        allow_script_execution=bool(config.skills.allow_script_execution)
+    )
     
     _global_provider_registry = ServiceProviderRegistry()
     _global_provider_registry.load_from_directory(providers_root)
@@ -368,12 +410,14 @@ async def lifespan(app: FastAPI):
     agent = _build_agent_for("main", seed_token)
 
     # Create AgentRunner
-    prompt_builder = PromptBuilder(PromptBuilderConfig())
+    prompt_builder = PromptBuilder(PromptBuilderConfig(workspace_path=workspace_path))
     _agent_runner = AgentRunner(
         agent=agent,
         session_manager=_session_manager,
+        session_manager_router=_session_manager_router,
         prompt_builder=prompt_builder,
         session_queue=_session_queue,
+        hook_runtime=_hook_runtime,
         agent_id="main",
         token_policy=token_policy,
         agent_pool=agent_pool,
@@ -384,6 +428,7 @@ async def lifespan(app: FastAPI):
     
     # Set agent runner on channel manager for message processing
     _channel_manager.set_agent_runner(_agent_runner)
+    _channel_manager.set_session_manager_router(_session_manager_router)
     
     # Auto-start enabled channel connections for default user
     async def start_enabled_connections(db_ready: bool):
@@ -447,6 +492,11 @@ async def lifespan(app: FastAPI):
 
     api_context = APIContext(
         session_manager=_session_manager,
+        session_manager_router=_session_manager_router,
+        hook_state_store=_hook_state_store,
+        memory_sink=_memory_sink,
+        context_sink=_context_sink,
+        hook_runtime=_hook_runtime,
         session_queue=_session_queue,
         skill_registry=_skill_registry,
         agent_runner=_agent_runner,

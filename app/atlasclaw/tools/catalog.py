@@ -17,8 +17,8 @@ GROUP_PROVIDERS = "group:providers"
 
 # Tools included in each logical group.
 GROUP_TOOLS: dict[str, list[str]] = {
-    GROUP_FS: ["read", "write", "edit", "delete_file"],
-    GROUP_RUNTIME: ["exec", "process"],
+    GROUP_FS: [],
+    GROUP_RUNTIME: [],
     GROUP_WEB: ["web_search", "web_fetch"],
     GROUP_MEMORY: ["memory_search", "memory_get"],
     GROUP_SESSIONS: [

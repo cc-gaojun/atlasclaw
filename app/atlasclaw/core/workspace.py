@@ -7,8 +7,8 @@ and management for AtlasClaw.
 from __future__ import annotations
 
 import json
+import shutil
 from pathlib import Path
-from typing import Optional
 
 
 class WorkspaceInitializer:
@@ -33,6 +33,7 @@ class WorkspaceInitializer:
         """
         self.workspace_path = Path(workspace_path).resolve()
         self.users_dir = self.workspace_path / "users"
+        self._main_agent_filenames = ("SOUL.md", "IDENTITY.md", "USER.md", "MEMORY.md")
     
     def initialize(self) -> bool:
         """Initialize workspace directory structure.
@@ -66,121 +67,23 @@ class WorkspaceInitializer:
             return False
     
     def _create_default_main_agent(self) -> None:
-        """Create default main agent if it doesn't exist."""
+        """Ensure the default main agent exists from repo templates."""
         main_agent_dir = self.workspace_path / "agents" / "main"
-        if main_agent_dir.exists():
-            return
-        
         main_agent_dir.mkdir(parents=True, exist_ok=True)
-        
-        # Create SOUL.md
-        soul_md = main_agent_dir / "SOUL.md"
-        if not soul_md.exists():
-            soul_md.write_text(self._default_soul_md(), encoding="utf-8")
-        
-        # Create IDENTITY.md
-        identity_md = main_agent_dir / "IDENTITY.md"
-        if not identity_md.exists():
-            identity_md.write_text(self._default_identity_md(), encoding="utf-8")
-        
-        # Create USER.md
-        user_md = main_agent_dir / "USER.md"
-        if not user_md.exists():
-            user_md.write_text(self._default_user_md(), encoding="utf-8")
-        
-        # Create MEMORY.md
-        memory_md = main_agent_dir / "MEMORY.md"
-        if not memory_md.exists():
-            memory_md.write_text(self._default_memory_md(), encoding="utf-8")
-    
-    def _default_soul_md(self) -> str:
-        """Default SOUL.md content."""
-        return '''---
-agent_id: "main"
-name: "Enterprise Assistant"
-version: "1.0"
----
 
-## System Prompt
+        template_dir = self._get_default_main_agent_template_dir()
+        for filename in self._main_agent_filenames:
+            target_path = main_agent_dir / filename
+            if target_path.exists():
+                continue
+            shutil.copy2(template_dir / filename, target_path)
 
-You are an intelligent assistant for the enterprise, helping employees with daily work tasks.
+    def _get_default_main_agent_template_dir(self) -> Path:
+        """Return the repo template directory for the default main agent."""
+        return Path(__file__).resolve().parent.parent / "templates" / "agents" / "main"
 
-## Capabilities
-
-- Answer enterprise-related questions
-- Assist with document and data processing
-- Provide technical support
-
-## Available Providers
-
-- jira
-- confluence
-
-## Available Skills
-
-- query_knowledge
-- create_ticket
-'''
-    
-    def _default_identity_md(self) -> str:
-        """Default IDENTITY.md content."""
-        return '''---
-agent_id: "main"
----
-
-# IDENTITY.md - Agent Identity
-
-## Basic Information
-
-- **Display Name**: Assistant
-- **Avatar**: 🤖
-- **Tone**: Professional, Friendly, Concise
-
-## Interaction Style
-
-- Provide direct answers first
-- Offer detailed explanations when needed
-- Respond in English
-'''
-    
-    def _default_user_md(self) -> str:
-        """Default USER.md content."""
-        return '''---
-agent_id: "main"
----
-
-# USER.md - User Interaction Mode
-
-## Personalization Settings
-
-- Remember user preferences
-- Adjust response depth based on user role
-
-## Proactive Behaviors
-
-- Proactively notify when important information is detected
-'''
-    
-    def _default_memory_md(self) -> str:
-        """Default MEMORY.md content."""
-        return '''---
-agent_id: "main"
----
-
-# MEMORY.md - Memory Strategy
-
-## Long-term Memory
-
-- Auto-extraction: Yes
-- Extraction triggers: Conversation end, key decision points
-
-## Context Management
-
-- Maximum rounds: 20
-- Compression strategy: Summary + Key decisions retention
-'''
-    
     def is_initialized(self) -> bool:
+
         """Check if workspace is initialized.
         
         Note: skills/ and channels/ are no longer required as they are external.
@@ -189,7 +92,13 @@ agent_id: "main"
             self.workspace_path.exists()
             and (self.workspace_path / "agents").exists()
             and self.users_dir.exists()
+            and self._default_main_agent_exists()
         )
+
+    def _default_main_agent_exists(self) -> bool:
+        """Return True when the default main agent directory contains all required files."""
+        main_agent_dir = self.workspace_path / "agents" / "main"
+        return all((main_agent_dir / filename).exists() for filename in self._main_agent_filenames)
 
 
 class UserWorkspaceInitializer:

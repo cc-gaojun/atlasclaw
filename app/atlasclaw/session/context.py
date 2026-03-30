@@ -305,6 +305,8 @@ class SessionMetadata:
     channel: str = "main"
     account_id: str = "default"
     peer_id: str = "default"
+    title: str = ""
+    title_status: str = "empty"
     display_name: Optional[str] = None
     origin: Optional[SessionOrigin] = None
     input_tokens: int = 0
@@ -327,6 +329,8 @@ class SessionMetadata:
             "channel": self.channel,
             "account_id": self.account_id,
             "peer_id": self.peer_id,
+            "title": self.title,
+            "title_status": self.title_status,
             "display_name": self.display_name,
             "origin": {
                 "label": self.origin.label,
@@ -361,6 +365,8 @@ class SessionMetadata:
             channel=data.get("channel", "main"),
             account_id=data.get("account_id", "default"),
             peer_id=data.get("peer_id", "default"),
+            title=data.get("title", ""),
+            title_status=data.get("title_status", "empty"),
             display_name=data.get("display_name"),
             origin=origin,
             input_tokens=data.get("input_tokens", 0),

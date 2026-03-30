@@ -65,7 +65,7 @@ class TestDingTalkHandler:
         
         start_result = await handler.start(None)
         assert start_result is True
-        assert handler.get_status() == ConnectionStatus.CONNECTED
+        assert handler.get_status() == ConnectionStatus.CONNECTING
         
         stop_result = await handler.stop()
         assert stop_result is True

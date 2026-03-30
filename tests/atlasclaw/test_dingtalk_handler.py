@@ -161,12 +161,12 @@ class TestDingTalkHandler:
 
     @pytest.mark.asyncio
     async def test_start_sets_connected_status(self):
-        """Test start method sets status to CONNECTED."""
+        """Test start method sets status to CONNECTING."""
         handler = DingTalkHandler()
         result = await handler.start(None)
         
         assert result is True
-        assert handler._status == ConnectionStatus.CONNECTED
+        assert handler._status == ConnectionStatus.CONNECTING
 
     @pytest.mark.asyncio
     async def test_stop_disconnects(self):

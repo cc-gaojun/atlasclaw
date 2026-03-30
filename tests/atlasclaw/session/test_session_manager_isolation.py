@@ -121,3 +121,19 @@ class TestSessionManagerIsolation:
         assert not tmp_path_file.exists()
         data = json.loads(metadata_path.read_text(encoding="utf-8"))
         assert "agent:main:user:alice:api:dm:bob" in data
+
+    @pytest.mark.asyncio
+    async def test_session_manager_router_routes_by_session_user(self, tmp_path):
+        from app.atlasclaw.session.router import SessionManagerRouter
+
+        router = SessionManagerRouter(workspace_path=str(tmp_path))
+        session_key = "agent:main:user:u-alice:web:dm:u-alice"
+        manager = router.for_session_key(session_key)
+
+        await manager.get_or_create(session_key)
+
+        alice_metadata = tmp_path / "users" / "u-alice" / "sessions" / "sessions.json"
+        default_metadata = tmp_path / "users" / "default" / "sessions" / "sessions.json"
+
+        assert alice_metadata.exists()
+        assert not default_metadata.exists()

@@ -19,6 +19,8 @@ from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 from typing import TYPE_CHECKING, Optional
+
+from app.atlasclaw.core.config import get_config
 from app.atlasclaw.agent import prompt_sections
 
 if TYPE_CHECKING:
@@ -46,7 +48,7 @@ class PromptBuilderConfig:
     """PromptBuilder configuration"""
     mode: PromptMode = PromptMode.FULL
     bootstrap_max_chars: int = 20000
-    workspace_path: str = "~/.atlasclaw/workspace"
+    workspace_path: str = ""
     user_timezone: Optional[str] = None
     time_format: str = "auto"  # auto | 12 | 24
     sandbox: SandboxConfig = field(default_factory=SandboxConfig)
@@ -72,7 +74,7 @@ class PromptBuilder:
         ```python
         config = PromptBuilderConfig(
             mode=PromptMode.FULL,
-            workspace_path="~/.atlasclaw/workspace",
+            workspace_path="/path/to/workspace",
         )
         builder = PromptBuilder(config)
         
@@ -97,6 +99,8 @@ class PromptBuilder:
     
     def __init__(self, config: PromptBuilderConfig):
         """Initialize the prompt builder with the provided configuration."""
+        if not config.workspace_path:
+            config.workspace_path = str(Path(get_config().workspace.path).expanduser().resolve())
         self.config = config
     
     def build(

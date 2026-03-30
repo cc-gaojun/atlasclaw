@@ -1,7 +1,7 @@
 """
 ShadowUserStore — persists the external-identity → internal-user mapping.
 
-Storage: ~/.atlasclaw/users.json
+Storage: <workspace>/users.json
 Concurrency: asyncio.Lock guarantees idempotent writes under concurrent load.
 """
 
@@ -30,11 +30,12 @@ class ShadowUserStore:
 
     def __init__(
         self,
-        store_path: str = "~/.atlasclaw/users.json",
+        store_path: Optional[str] = None,
         workspace_path: str = ".",
     ) -> None:
-        self._path = Path(store_path).expanduser()
         self._workspace_path = Path(workspace_path).resolve()
+        default_store_path = self._workspace_path / "users.json"
+        self._path = Path(store_path).expanduser().resolve() if store_path else default_store_path
         self._lock = asyncio.Lock()
         self._users: dict[str, ShadowUser] = {}    # user_id -> ShadowUser
         self._index: dict[str, str] = {}           # "provider:subject" -> user_id

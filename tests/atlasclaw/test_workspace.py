@@ -73,6 +73,16 @@ class TestWorkspaceInitializer:
         initializer.initialize()
         assert initializer.is_initialized() is True
 
+    def test_is_initialized_returns_false_when_main_agent_file_missing(self, tmp_path):
+        """Test: Missing main agent files should make workspace incomplete."""
+        workspace = tmp_path / ".atlasclaw"
+        initializer = WorkspaceInitializer(str(workspace))
+        initializer.initialize()
+
+        (workspace / "agents" / "main" / "SOUL.md").unlink()
+
+        assert initializer.is_initialized() is False
+
     def test_default_main_agent_content(self, tmp_path):
         """Test: Verify default main Agent file content"""
         workspace = tmp_path / ".atlasclaw"
@@ -85,6 +95,40 @@ class TestWorkspaceInitializer:
         assert "agent_id: \"main\"" in content
         assert "System Prompt" in content
         assert "Capabilities" in content
+        assert "AtlasClaw Enterprise AI Assistant" in content
+
+    def test_default_main_agent_matches_repo_template(self, tmp_path):
+        """Test: Default main agent files are copied from repo templates."""
+        workspace = tmp_path / ".atlasclaw"
+        initializer = WorkspaceInitializer(str(workspace))
+
+        initializer.initialize()
+
+        main_agent_dir = workspace / "agents" / "main"
+        template_dir = initializer._get_default_main_agent_template_dir()
+        for filename in ("SOUL.md", "IDENTITY.md", "USER.md", "MEMORY.md"):
+            assert (main_agent_dir / filename).read_text(encoding="utf-8") == (
+                template_dir / filename
+            ).read_text(encoding="utf-8")
+
+    def test_initialize_restores_only_missing_main_agent_files(self, tmp_path):
+        """Test: Existing main agent files are preserved and missing files are restored."""
+        workspace = tmp_path / ".atlasclaw"
+        initializer = WorkspaceInitializer(str(workspace))
+        initializer.initialize()
+
+        main_agent_dir = workspace / "agents" / "main"
+        soul_md = main_agent_dir / "SOUL.md"
+        user_md = main_agent_dir / "USER.md"
+
+        soul_md.write_text("custom soul", encoding="utf-8")
+        user_md.unlink()
+
+        initializer.initialize()
+
+        assert soul_md.read_text(encoding="utf-8") == "custom soul"
+        assert user_md.exists()
+        assert "User Interaction Configuration" in user_md.read_text(encoding="utf-8")
 
 
 class TestUserWorkspaceInitializer:

@@ -34,6 +34,11 @@ class HistoryMemoryCoordinator:
                 normalized.append(item)
                 continue
 
+            expanded = self._expand_structured_message(msg)
+            if expanded:
+                normalized.extend(expanded)
+                continue
+
             role = self._extract_message_role(msg)
             content = self._extract_message_content(msg)
             item = {
@@ -57,6 +62,33 @@ class HistoryMemoryCoordinator:
                 item["tool_calls"] = normalized_tool_calls
             normalized.append(item)
         return normalized
+
+    def _expand_structured_message(self, msg: Any) -> list[dict]:
+        """Expand structured request/response messages into transcript-safe items."""
+        kind = getattr(msg, "kind", "")
+        parts = getattr(msg, "parts", None) or []
+        if not parts:
+            return []
+
+        if kind == "request":
+            expanded: list[dict] = []
+            for part in parts:
+                part_kind = getattr(part, "part_kind", "")
+                part_content = getattr(part, "content", None)
+                if not part_content:
+                    continue
+                if part_kind == "system-prompt":
+                    expanded.append({"role": "system", "content": str(part_content)})
+                    continue
+                if part_kind == "user-prompt":
+                    expanded.append({"role": "user", "content": str(part_content)})
+            return expanded
+
+        if kind == "response":
+            content = self._extract_message_content(msg)
+            if content:
+                return [{"role": "assistant", "content": content}]
+        return []
 
     def build_message_history(self, transcript: list[Any]) -> list[dict]:
         """Convert transcript entries into normalized messages."""

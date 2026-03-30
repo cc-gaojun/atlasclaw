@@ -22,6 +22,12 @@ def _make_result(subject: str, display_name: str = "Test", tenant_id: str = "t1"
 
 
 class TestShadowUserStore:
+    def test_workspace_path_is_used_for_default_store_path(self, tmp_path):
+        workspace = tmp_path / "custom-workspace"
+        store = ShadowUserStore(workspace_path=str(workspace))
+
+        assert store.workspace_path == workspace.resolve()
+        assert store._path == (workspace / "users.json").resolve()
 
     @pytest.mark.asyncio
     async def test_create_new_user(self, tmp_path):

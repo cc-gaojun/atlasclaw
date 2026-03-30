@@ -44,7 +44,9 @@ def get_current_user_id(request: Request) -> str:
     For now, returns a default user. In production, this would
     extract user info from authentication.
     """
-    # TODO: Implement proper user authentication
+    user_info = getattr(request.state, "user_info", None)
+    if user_info is not None and getattr(user_info, "user_id", None):
+        return str(user_info.user_id)
     return request.headers.get("X-User-Id", "default")
 
 

@@ -20,6 +20,8 @@ from app.atlasclaw.skills.registry import (
 )
 from app.atlasclaw.agent.prompt_builder import PromptBuilder, PromptBuilderConfig, PromptMode
 from app.atlasclaw.core.config_schema import SkillsConfig, AtlasClawConfig
+from app.atlasclaw.tools.catalog import ToolCatalog, ToolProfile
+from app.atlasclaw.tools.registration import register_builtin_tools
 
 
 # ======================================================================
@@ -481,6 +483,48 @@ class TestSkillRegistryMdLoading:
         assert "name" not in entry_meta
         assert "description" not in entry_meta
 
+    def test_script_backed_md_tool_disabled_by_default(self, tmp_path):
+        """Script-backed markdown tools should not register unless explicitly enabled."""
+        skill_dir = tmp_path / "script-skill"
+        _write_skill_md(
+            skill_dir / "SKILL.md",
+            [
+                "name: script-skill",
+                "description: script based",
+                "tool_name: script_tool",
+                "entrypoint: run.py:handler",
+            ],
+        )
+        (skill_dir / "run.py").write_text("print('hello')\n", encoding="utf-8")
+
+        reg = SkillRegistry()
+        reg.load_from_directory(str(tmp_path), location="workspace")
+
+        assert reg.get("script_tool") is None
+
+    def test_explicit_python_handler_md_tool_still_registers(self, tmp_path):
+        """Explicit callable handlers remain available without script execution."""
+        skill_dir = tmp_path / "callable-skill"
+        _write_skill_md(
+            skill_dir / "SKILL.md",
+            [
+                "name: callable-skill",
+                "description: callable based",
+                "tool_name: callable_tool",
+                "entrypoint: run.py:custom_handler",
+            ],
+        )
+        (skill_dir / "run.py").write_text(
+            "async def custom_handler(**kwargs):\n"
+            "    return {'ok': True, 'kwargs': kwargs}\n",
+            encoding="utf-8",
+        )
+
+        reg = SkillRegistry()
+        reg.load_from_directory(str(tmp_path), location="workspace")
+
+        assert reg.get("callable_tool") is not None
+
 
 # ======================================================================
 # 7.4 TestPromptBuilderMdSkills (11 cases)
@@ -602,7 +646,7 @@ class TestPromptBuilderMdSkills:
         b = self._builder()
         output = b._build_md_skills_index([_make_md_skill()])
 
-        assert "read" in output.lower()
+        assert "check whether an executable tool is already registered" in output.lower()
         assert "skill selection guidance" in output.lower()  # New guidance section
         assert "use_when" in output.lower() or "avoid_when" in output.lower()
 
@@ -721,6 +765,7 @@ class TestConfigSchema:
         assert cfg.md_skills_desc_max_chars == 200
         assert cfg.md_skills_index_max_chars == 3000
         assert cfg.md_skills_max_file_bytes == 262144
+        assert cfg.allow_script_execution is False
 
     def test_custom_values(self):
         """自定义值验证"""
@@ -739,3 +784,21 @@ class TestConfigSchema:
 
         pbcfg = PromptBuilderConfig()
         assert pbcfg.md_skills_max_index_chars == 3000
+
+
+class TestBuiltinToolHardening:
+    """Built-in tool registration hardening tests."""
+
+    def test_full_profile_excludes_high_risk_tools(self):
+        tools = ToolCatalog.get_tools_by_profile(ToolProfile.FULL)
+
+        for tool_name in ("read", "write", "edit", "delete_file", "exec", "process"):
+            assert tool_name not in tools
+
+    def test_register_builtin_tools_excludes_high_risk_tools(self):
+        reg = SkillRegistry()
+        registered = register_builtin_tools(reg, profile=ToolProfile.FULL)
+
+        for tool_name in ("read", "write", "edit", "delete_file", "exec", "process"):
+            assert tool_name not in registered
+            assert reg.get(tool_name) is None

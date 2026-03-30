@@ -80,6 +80,16 @@ The general workflow for setting up any channel:
 +-----------------------------------------------------------------------+
 ```
 
+### Session Scope Rules
+
+Channel traffic must build canonical `SessionKey` values instead of ad-hoc strings.
+
+- `user_id` is the AtlasClaw user who owns the channel connection
+- `account_id` is the concrete channel connection ID
+- Direct messages use the external sender as `peer_id`
+- Group chats use the group or conversation ID as `peer_id`
+- Group chats are therefore shared by group, while direct messages remain isolated per external user
+
 ### Step 5: Verify Connection
 
 Before enabling a connection, you can verify that your credentials are correct:

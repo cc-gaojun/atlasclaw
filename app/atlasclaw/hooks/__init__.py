@@ -19,10 +19,62 @@ from app.atlasclaw.hooks.system import (
     HookDefinition,
     HookSystem,
 )
+from app.atlasclaw.hooks.runtime_models import (
+    HookDecision,
+    HookDecisionRecord,
+    HookEventEnvelope,
+    HookEventType,
+    HookScriptAction,
+    HookScriptActionBatch,
+    HookScriptActionType,
+    HookWriteMemoryRequest,
+    HookContextInjection,
+    PendingHookItem,
+    PendingHookStatus,
+)
+from app.atlasclaw.hooks.runtime_store import HookStateStore
+from app.atlasclaw.hooks.runtime_sinks import (
+    ContextSink,
+    HookMemoryWriteResult,
+    MemorySink,
+)
+from app.atlasclaw.hooks.runtime import (
+    HookHandlerDefinition,
+    HookRuntime,
+    HookRuntimeContext,
+)
+from app.atlasclaw.hooks.runtime_script import (
+    HookScriptExecutionError,
+    HookScriptExecutionResult,
+    HookScriptHandlerDefinition,
+    HookScriptRunner,
+)
 
 __all__ = [
     "HookPhase",
     "HookExecutionMode",
     "HookDefinition",
     "HookSystem",
+    "HookDecision",
+    "HookDecisionRecord",
+    "HookEventEnvelope",
+    "HookEventType",
+    "HookScriptAction",
+    "HookScriptActionBatch",
+    "HookScriptActionType",
+    "HookWriteMemoryRequest",
+    "HookContextInjection",
+    "PendingHookItem",
+    "PendingHookStatus",
+    "HookStateStore",
+    "ContextSink",
+    "HookMemoryWriteResult",
+    "MemorySink",
+    "HookHandlerDefinition",
+    "HookRuntime",
+    "HookRuntimeContext",
+    "HookScriptExecutionError",
+    "HookScriptExecutionResult",
+    "HookScriptHandlerDefinition",
+    "HookScriptRunner",
 ]

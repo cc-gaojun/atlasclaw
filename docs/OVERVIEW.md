@@ -338,6 +338,15 @@ All API paths are prefixed with `/api`.
 
 Sessions track conversation context. A `session_key` is returned on creation and used for all subsequent calls.
 
+AtlasClaw now treats session ownership and chat threading as separate concerns:
+
+- `user_id` in the canonical `SessionKey` identifies the AtlasClaw user that owns the session bucket
+- `channel`, `account_id`, `chat_type`, and `peer_id` identify the external conversation scope
+- `thread_id` identifies an independent chat thread inside the same scope
+- Session metadata and transcripts are stored under `workspace/users/<user_id>/sessions/`
+
+`GET /api/sessions` returns all sessions owned by the current authenticated user across all channels, not just the web UI.
+
 #### Create a Session
 
 ```http
@@ -352,6 +361,23 @@ Content-Type: application/json
 }
 ```
 
+This endpoint returns the stable scope session. It is useful when you want deterministic reuse of a conversation key.
+
+#### Create a New Chat Thread
+
+```http
+POST /api/sessions/threads
+Content-Type: application/json
+
+{
+  "agent_id": "main",
+  "channel": "web",
+  "chat_type": "dm"
+}
+```
+
+This endpoint always creates a new independent thread and returns a distinct `session_key`.
+
 #### Get / Reset / Delete a Session
 
 ```http
@@ -359,6 +385,8 @@ GET    /api/sessions/{session_key}
 POST   /api/sessions/{session_key}/reset    Body: { "archive": true }
 DELETE /api/sessions/{session_key}
 ```
+
+Direct session operations enforce ownership. A user cannot inspect, reset, compact, queue, or delete another user's session key.
 
 ### 6.2 Agent Execution
 

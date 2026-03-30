@@ -20,6 +20,7 @@ from app.atlasclaw.session.context import (
     TranscriptEntry,
 )
 from app.atlasclaw.session.queue import SessionQueue, QueueMode
+from app.atlasclaw.session.router import SessionManagerRouter
 
 __all__ = [
     "SessionScope",
@@ -32,4 +33,5 @@ __all__ = [
     "TranscriptEntry",
     "SessionQueue",
     "QueueMode",
+    "SessionManagerRouter",
 ]

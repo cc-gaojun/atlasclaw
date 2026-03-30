@@ -11,7 +11,7 @@ Storage layout (new workspace-based):
 └── archive/                             # Archived transcripts
 ```
 
-Legacy layout (~/.atlasclaw/agents/<agent_id>/sessions/<user_id>/) is still supported
+Legacy layout (<legacy agents dir>/<agent_id>/sessions/<user_id>/) is still supported
 for backward compatibility.
 """
 
@@ -45,7 +45,7 @@ class SessionManager:
 
     Example:
         ```python
-        manager = SessionManager(agents_dir="~/.atlasclaw/agents")
+manager = SessionManager(agents_dir="/path/to/legacy-agents")
 
         session = await manager.get_or_create(session_key)
         transcript = await manager.load_transcript(session_key)
@@ -463,6 +463,21 @@ class SessionManager:
         session.output_tokens += output_tokens
         session.total_tokens += input_tokens + output_tokens
         session.context_tokens = context_tokens
+        session.updated_at = datetime.now()
+        await self._save_metadata()
+
+    async def update_title(
+        self,
+        session_key: str,
+        *,
+        title: str,
+        title_status: str,
+    ) -> None:
+        """Persist session title metadata."""
+        session = await self.get_or_create(session_key)
+        normalized_title = (title or "").strip()
+        session.title = normalized_title
+        session.title_status = title_status
         session.updated_at = datetime.now()
         await self._save_metadata()
     

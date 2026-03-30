@@ -5,7 +5,10 @@ Agent 模块单元测试
 测试 StreamEvent、BlockChunker、CompactionPipeline、PromptBuilder 等组件。
 """
 
+from pathlib import Path
+
 import pytest
+import app.atlasclaw.core.config as config_module
 
 from app.atlasclaw.agent.stream import (
     StreamEvent,
@@ -210,6 +213,24 @@ class TestPromptBuilder:
         prompt = builder.build(tools=tools)
         
         assert len(prompt) > 0
+
+
+    def test_builder_uses_configured_workspace_path_when_not_provided(self, tmp_path, monkeypatch):
+        """PromptBuilder should resolve workspace path from config when omitted."""
+        config_path = tmp_path / "atlasclaw.json"
+        config_path.write_text(
+            '{\n  "workspace": {\n    "path": "custom-workspace"\n  }\n}\n',
+            encoding="utf-8",
+        )
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setenv("ATLASCLAW_CONFIG", str(config_path))
+        config_module._config_manager = None
+
+        builder = PromptBuilder(PromptBuilderConfig(workspace_path=""))
+
+        assert Path(builder.config.workspace_path).resolve() == (
+            tmp_path / "custom-workspace"
+        ).resolve()
 
 
 if __name__ == "__main__":

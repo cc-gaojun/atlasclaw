@@ -15,7 +15,7 @@ jest.mock('../../app/frontend/scripts/config.js', () => ({
 global.fetch = jest.fn();
 
 beforeEach(() => {
-    global.fetch.mockClear();
+    global.fetch.mockReset();
 });
 
 describe('api-client.js', () => {
@@ -38,6 +38,16 @@ describe('api-client.js', () => {
             });
             const { getSession } = await import('../../app/frontend/scripts/api-client.js');
             await getSession('sk-1');
+            expect(global.fetch.mock.calls[0][1]).toMatchObject({ credentials: 'include' });
+        });
+
+        test('getAgentInfo sends credentials: include', async () => {
+            global.fetch.mockResolvedValueOnce({
+                ok: true,
+                json: () => Promise.resolve({ name: 'Enterprise Assistant' })
+            });
+            const { getAgentInfo } = await import('../../app/frontend/scripts/api-client.js');
+            await getAgentInfo();
             expect(global.fetch.mock.calls[0][1]).toMatchObject({ credentials: 'include' });
         });
 

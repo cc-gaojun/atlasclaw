@@ -32,7 +32,10 @@ from app.atlasclaw.agent.runner_prompt_context import (
     collect_md_skills_snapshot,
 )
 from app.atlasclaw.agent.runtime_events import RuntimeEventDispatcher
+from app.atlasclaw.agent.session_titles import SessionTitleGenerator
 from app.atlasclaw.agent.thinking_stream import ThinkingStreamEmitter
+from app.atlasclaw.hooks.runtime import HookRuntime
+from app.atlasclaw.session.context import SessionKey
 
 if TYPE_CHECKING:
     from app.atlasclaw.agent.agent_pool import AgentInstancePool
@@ -43,6 +46,7 @@ if TYPE_CHECKING:
 if TYPE_CHECKING:
     from app.atlasclaw.session.manager import SessionManager
     from app.atlasclaw.session.queue import SessionQueue
+    from app.atlasclaw.session.router import SessionManagerRouter
     from app.atlasclaw.hooks.system import HookSystem
 
 
@@ -58,6 +62,8 @@ class AgentRunner:
         compaction: Optional[CompactionPipeline] = None,
         hook_system: Optional["HookSystem"] = None,
         session_queue: Optional["SessionQueue"] = None,
+        session_manager_router: Optional["SessionManagerRouter"] = None,
+        hook_runtime: Optional[HookRuntime] = None,
         *,
         agent_id: str = "main",
         token_policy: Optional["DynamicTokenPolicy"] = None,
@@ -81,13 +87,16 @@ class AgentRunner:
         self.compaction = compaction or CompactionPipeline(CompactionConfig())
         self.hooks = hook_system
         self.queue = session_queue
+        self.session_manager_router = session_manager_router
         self.agent_id = agent_id
         self.token_policy = token_policy
         self.agent_pool = agent_pool
         self.token_interceptor = token_interceptor
         self.agent_factory = agent_factory
-        self.history = HistoryMemoryCoordinator(self.sessions, self.compaction)
-        self.runtime_events = RuntimeEventDispatcher(self.hooks, self.queue)
+        self.history = HistoryMemoryCoordinator(session_manager_router or self.sessions, self.compaction)
+        self.runtime_events = RuntimeEventDispatcher(self.hooks, self.queue, hook_runtime)
+        self.title_generator = SessionTitleGenerator()
+        self.hook_runtime = hook_runtime
 
     
     async def run(
@@ -110,6 +119,15 @@ class AgentRunner:
         selected_token_id: Optional[str] = None
         release_slot: Optional[Any] = None
         flushed_memory_signatures: set[str] = set()
+        extra = deps.extra if isinstance(deps.extra, dict) else {}
+        run_id = str(extra.get("run_id", "") or "")
+        run_failed = False
+        message_history: list[dict] = []
+        system_prompt = ""
+        final_assistant = ""
+        context_history_for_hooks: list[dict] = []
+        tool_call_summaries: list[dict[str, Any]] = []
+        session_title = ""
 
 
         try:
@@ -117,13 +135,33 @@ class AgentRunner:
 
             runtime_agent, selected_token_id, release_slot = await self._resolve_runtime_agent(session_key, deps)
             runtime_context_window = self._resolve_runtime_context_window(selected_token_id, deps)
+            session_manager = self._resolve_session_manager(session_key, deps)
 
             # --:session + build prompt --
 
-            session = await self.sessions.get_or_create(session_key)
-            transcript = await self.sessions.load_transcript(session_key)
+            session = await session_manager.get_or_create(session_key)
+            transcript = await session_manager.load_transcript(session_key)
             message_history = self.history.build_message_history(transcript)
             message_history = self.history.prune_summary_messages(message_history)
+            context_history_for_hooks = list(message_history)
+            session_title = str(getattr(session, "title", "") or "")
+            await self.runtime_events.trigger_message_received(
+                session_key=session_key,
+                run_id=run_id,
+                user_message=user_message,
+            )
+            await self.runtime_events.trigger_run_started(
+                session_key=session_key,
+                run_id=run_id,
+                user_message=user_message,
+            )
+            await self._maybe_set_draft_title(
+                session_manager=session_manager,
+                session_key=session_key,
+                session=session,
+                transcript=transcript,
+                user_message=user_message,
+            )
 
             system_prompt = build_system_prompt(
                 self.prompt_builder,
@@ -175,7 +213,8 @@ class AgentRunner:
                 compressed_history = await self.compaction.compact(message_history, session)
                 message_history = self.history.normalize_messages(compressed_history)
                 message_history = await self.history.inject_memory_recall(message_history, deps)
-                await self.sessions.mark_compacted(session_key)
+                context_history_for_hooks = list(message_history)
+                await session_manager.mark_compacted(session_key)
                 compaction_applied = True
                 yield StreamEvent.compaction_end()
                 if self.hooks:
@@ -197,14 +236,13 @@ class AgentRunner:
                     },
                 )
                 user_message = start_ctx.get("user_message", user_message)
-
-                # llm_input at leastat start trigger
-                await self.runtime_events.trigger_llm_input(
-                    session_key=session_key,
-                    user_message=user_message,
-                    system_prompt=system_prompt,
-                    message_history=message_history,
-                )
+            await self.runtime_events.trigger_llm_input(
+                session_key=session_key,
+                run_id=run_id,
+                user_message=user_message,
+                system_prompt=system_prompt,
+                message_history=message_history,
+            )
 
             # -- inject user_message to deps, for Skills --
             deps.user_message = user_message
@@ -240,6 +278,7 @@ class AgentRunner:
                         # -- checkpoint 3:context -> trigger --
                         current_messages = self.history.normalize_messages(agent_run.all_messages())
                         current_messages = self.history.prune_summary_messages(current_messages)
+                        context_history_for_hooks = list(current_messages)
                         if self.compaction.should_memory_flush(
                             current_messages,
                             session,
@@ -274,8 +313,9 @@ class AgentRunner:
                                 persist_override_messages,
                                 deps,
                             )
+                            context_history_for_hooks = list(persist_override_messages)
                             persist_override_base_len = len(current_messages)
-                            await self.sessions.mark_compacted(session_key)
+                            await session_manager.mark_compacted(session_key)
                             compaction_applied = True
                             yield StreamEvent.compaction_end()
                             if self.hooks:
@@ -288,9 +328,10 @@ class AgentRunner:
                                 )
 
                         # -- hook:llm_input() --
-                        if self.hooks and self._is_model_request_node(node):
+                        if self._is_model_request_node(node):
                             await self.runtime_events.trigger_llm_input(
                                 session_key=session_key,
+                                run_id=run_id,
                                 user_message=user_message,
                                 system_prompt=system_prompt,
                                 message_history=current_messages,
@@ -315,12 +356,19 @@ class AgentRunner:
 
                         # Surface tool activity in the event stream.
                         tool_calls_in_node = self.runtime_events.collect_tool_calls(node)
+                        for tool_call in tool_calls_in_node:
+                            if isinstance(tool_call, dict):
+                                tool_name = tool_call.get("name", tool_call.get("tool_name", "unknown_tool"))
+                            else:
+                                tool_name = getattr(tool_call, "tool_name", getattr(tool_call, "name", "unknown_tool"))
+                            tool_call_summaries.append({"name": str(tool_name)})
                         tool_dispatch = await self.runtime_events.dispatch_tool_calls(
                             tool_calls_in_node,
                             tool_calls_count=tool_calls_count,
                             max_tool_calls=max_tool_calls,
                             deps=deps,
                             session_key=session_key,
+                            run_id=run_id,
                         )
                         tool_calls_count = tool_dispatch.tool_calls_count
                         for event in tool_dispatch.events:
@@ -341,6 +389,14 @@ class AgentRunner:
                         else:
                             final_messages = persist_override_messages
 
+                    final_assistant = next(
+                        (
+                            msg["content"]
+                            for msg in reversed(final_messages)
+                            if msg.get("role") == "assistant" and msg.get("content")
+                        ),
+                        "",
+                    )
                     if not thinking_emitter.assistant_emitted:
                         # Try to get response from agent_run.result first (pydantic-ai structure)
                         final_assistant = ""
@@ -379,9 +435,56 @@ class AgentRunner:
                         if final_assistant:
                             thinking_emitter.assistant_emitted = True
                             yield StreamEvent.assistant_delta(final_assistant)
-                    await self.sessions.persist_transcript(session_key, final_messages)
+                    await self.runtime_events.trigger_llm_completed(
+                        session_key=session_key,
+                        run_id=run_id,
+                        assistant_message=final_assistant,
+                    )
+                    await session_manager.persist_transcript(session_key, final_messages)
+                    await self._maybe_finalize_title(
+                        session_manager=session_manager,
+                        session_key=session_key,
+                        session=session,
+                        final_messages=final_messages,
+                        user_message=user_message,
+                    )
+                    session_title = str(getattr(session, "title", "") or "")
+                    await self.runtime_events.trigger_run_context_ready(
+                        session_key=session_key,
+                        run_id=run_id,
+                        user_message=user_message,
+                        system_prompt=system_prompt,
+                        message_history=context_history_for_hooks,
+                        assistant_message=final_assistant,
+                        tool_calls=tool_call_summaries,
+                        run_status="completed",
+                        session_title=session_title,
+                    )
 
             except Exception as e:
+                run_failed = True
+                await self.runtime_events.trigger_llm_failed(
+                    session_key=session_key,
+                    run_id=run_id,
+                    error=str(e),
+                )
+                await self.runtime_events.trigger_run_failed(
+                    session_key=session_key,
+                    run_id=run_id,
+                    error=str(e),
+                )
+                await self.runtime_events.trigger_run_context_ready(
+                    session_key=session_key,
+                    run_id=run_id,
+                    user_message=user_message,
+                    system_prompt=system_prompt,
+                    message_history=context_history_for_hooks,
+                    assistant_message=final_assistant,
+                    tool_calls=tool_call_summaries,
+                    run_status="failed",
+                    error=str(e),
+                    session_title=session_title,
+                )
                 # Close thinking phase on exception to maintain contract
                 async for event in thinking_emitter.close_if_active():
                     yield event
@@ -390,15 +493,34 @@ class AgentRunner:
                 yield StreamEvent.error_event(f"agent_error: {str(e)}")
 
             # -- hook:agent_end --
-            await self.runtime_events.trigger_agent_end(
-                session_key=session_key,
-                tool_calls_count=tool_calls_count,
-                compaction_applied=compaction_applied,
-            )
+            if not run_failed:
+                await self.runtime_events.trigger_agent_end(
+                    session_key=session_key,
+                    run_id=run_id,
+                    tool_calls_count=tool_calls_count,
+                    compaction_applied=compaction_applied,
+                )
 
             yield StreamEvent.lifecycle_end()
 
         except Exception as e:
+            await self.runtime_events.trigger_run_failed(
+                session_key=session_key,
+                run_id=run_id,
+                error=str(e),
+            )
+            await self.runtime_events.trigger_run_context_ready(
+                session_key=session_key,
+                run_id=run_id,
+                user_message=user_message,
+                system_prompt=system_prompt,
+                message_history=context_history_for_hooks,
+                assistant_message=final_assistant,
+                tool_calls=tool_call_summaries,
+                run_status="failed",
+                error=str(e),
+                session_title=session_title,
+            )
             # Close thinking phase on exception to maintain contract
             async for event in thinking_emitter.close_if_active():
                 yield event
@@ -475,6 +597,73 @@ class AgentRunner:
 
         # 3) Fall back to configured compaction context window.
         return self.compaction.config.context_window
+
+    def _resolve_session_manager(self, session_key: str, deps: SkillDeps) -> Any:
+        """Resolve the correct per-user session manager for the active session."""
+        parsed = SessionKey.from_string(session_key)
+        scoped_manager = getattr(deps, "session_manager", None)
+        scoped_user_id = getattr(scoped_manager, "user_id", None)
+        if scoped_manager is not None and scoped_user_id == parsed.user_id:
+            return scoped_manager
+        if self.session_manager_router is not None:
+            return self.session_manager_router.for_session_key(session_key)
+        return self.sessions
+
+    async def _maybe_set_draft_title(
+        self,
+        *,
+        session_manager: Any,
+        session_key: str,
+        session: Any,
+        transcript: list[Any],
+        user_message: str,
+    ) -> None:
+        """Create a draft title for brand-new chat threads."""
+        if getattr(session, "title_status", "empty") not in {"", "empty"}:
+            return
+        if transcript:
+            return
+        draft_title = self.title_generator.build_draft_title(user_message)
+        await session_manager.update_title(
+            session_key,
+            title=draft_title,
+            title_status="draft",
+        )
+        session.title = draft_title
+        session.title_status = "draft"
+
+    async def _maybe_finalize_title(
+        self,
+        *,
+        session_manager: Any,
+        session_key: str,
+        session: Any,
+        final_messages: list[dict],
+        user_message: str,
+    ) -> None:
+        """Promote a draft title to a stable final title after the first assistant reply."""
+        if getattr(session, "title_status", "empty") == "final":
+            return
+        assistant_message = next(
+            (
+                msg.get("content", "")
+                for msg in final_messages
+                if msg.get("role") == "assistant" and msg.get("content")
+            ),
+            "",
+        )
+        final_title = self.title_generator.build_final_title(
+            first_user_message=user_message,
+            first_assistant_message=assistant_message,
+            existing_title=getattr(session, "title", ""),
+        )
+        await session_manager.update_title(
+            session_key,
+            title=final_title,
+            title_status="final",
+        )
+        session.title = final_title
+        session.title_status = "final"
 
     @asynccontextmanager
 

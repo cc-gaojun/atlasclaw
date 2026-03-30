@@ -13,6 +13,16 @@ class SessionCreateRequest(BaseModel):
     channel: str = "api"
     chat_type: str = "dm"
     scope: str = "main"
+    account_id: str = "default"
+    peer_id: Optional[str] = None
+
+
+class SessionThreadCreateRequest(BaseModel):
+    agent_id: str = "main"
+    channel: str = "web"
+    chat_type: str = "dm"
+    account_id: str = "default"
+    peer_id: Optional[str] = None
 
 
 class SessionResponse(BaseModel):
@@ -20,10 +30,26 @@ class SessionResponse(BaseModel):
     agent_id: str
     channel: str
     user_id: str
+    account_id: str = "default"
+    chat_type: str = "dm"
+    peer_id: str = "default"
+    thread_id: Optional[str] = None
     created_at: datetime
     last_activity: datetime
     message_count: int
     total_tokens: int
+    title: str = ""
+    title_status: str = "empty"
+
+
+class SessionHistoryMessage(BaseModel):
+    role: str
+    content: str
+    timestamp: datetime
+
+
+class SessionHistoryResponse(BaseModel):
+    messages: list[SessionHistoryMessage] = Field(default_factory=list)
 
 
 class SessionResetRequest(BaseModel):
@@ -117,5 +143,40 @@ class WebhookDispatchRequest(BaseModel):
 
 
 class WebhookDispatchResponse(BaseModel):
+    status: str
+
+
+class HookDecisionRequest(BaseModel):
+    note: Optional[str] = None
+
+
+class HookEventResponse(BaseModel):
+    id: str
+    event_type: str
+    user_id: str
+    session_key: str
+    run_id: str
+    channel: str
+    agent_id: str
+    created_at: datetime
+    payload: dict[str, Any] = Field(default_factory=dict)
+
+
+class HookPendingResponse(BaseModel):
+    id: str
+    module_name: str
+    user_id: str
+    source_event_ids: list[str] = Field(default_factory=list)
+    summary: str
+    payload: dict[str, Any] = Field(default_factory=dict)
+    status: str
+    created_at: datetime
+    updated_at: datetime
+
+
+class HookDecisionResponse(BaseModel):
+    pending_id: str
+    module_name: str
+    decision: str
     status: str
 

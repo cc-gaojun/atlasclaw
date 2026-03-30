@@ -18,13 +18,9 @@ logger = logging.getLogger(__name__)
 
 
 def build_provider_config(ctx: APIContext) -> dict[str, Any]:
-    provider_config: dict[str, Any] = {}
     if ctx.service_provider_registry:
-        for pt in ctx.service_provider_registry.list_providers():
-            instances = ctx.service_provider_registry.list_instances(pt)
-            if instances:
-                provider_config[pt] = instances
-    return provider_config
+        return ctx.service_provider_registry.get_all_instance_configs()
+    return {}
 
 
 def init_run(
@@ -98,6 +94,7 @@ async def execute_agent_run(
             provider_config=provider_config,
             extra={
                 "agent_id": target_agent_id,
+                "run_id": run_id,
                 "context": request_context or {},
             },
         )

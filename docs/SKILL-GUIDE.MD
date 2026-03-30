@@ -483,6 +483,25 @@ The Skill response is processed:
 #### 7. Result Delivery
 
 The result is delivered to the user:
+
+### Skill vs Hook Runtime
+
+AtlasClaw keeps **skills** and **hook runtime capabilities** deliberately separate.
+
+**Use a Skill when**:
+- You need a callable capability the model can select directly
+- You want executable or Markdown guidance scoped to a task
+- The behavior is request-driven and user-visible
+
+**Use the Hook Runtime when**:
+- You need lifecycle observation such as run, LLM, tool, or correction events
+- You need per-user module state under `workspace/users/<user_id>/hooks/<module_name>/`
+- You need confirmation workflows before promoting information into long-term memory
+- You need future context injection based on confirmed runtime output
+
+**Important boundary**:
+- Do not hard-code skill semantics into the hook runtime core
+- A skill may consume hook runtime capabilities, but the core hook layer should stay generic
 - Formatted message
 - Structured data
 - Follow-up suggestions

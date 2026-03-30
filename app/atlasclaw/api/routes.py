@@ -17,6 +17,7 @@ from fastapi.responses import JSONResponse
 from .deps_context import APIContext, get_api_context, set_api_context
 from .routes_agent import register_agent_routes
 from .routes_auth import register_auth_routes
+from .routes_hooks import register_hook_routes
 from .routes_session import register_session_routes
 from .routes_skills_memory import register_skills_memory_routes
 from .routes_webhook import register_webhook_routes
@@ -54,6 +55,7 @@ def install_request_validation_logging(app: FastAPI) -> None:
 def create_router() -> APIRouter:
     router = APIRouter(prefix="/api", tags=["AtlasClaw API"])
     register_session_routes(router)
+    register_hook_routes(router)
     register_agent_routes(router)
     register_skills_memory_routes(router)
     register_webhook_routes(router)

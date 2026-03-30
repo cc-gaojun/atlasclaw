@@ -22,7 +22,7 @@ def build_target_md_skill(target_md_skill: dict[str, str]) -> str:
     if file_path:
         lines.append(f"File path: {file_path}")
     lines.append("You must execute only this markdown skill for the current run.")
-    lines.append("Read the SKILL.md first before taking any other action.")
+    lines.append("Prefer any executable tool already registered for this skill.")
     return "\n".join(lines)
 
 
@@ -116,9 +116,9 @@ def build_md_skills_index(
 
     instructions = (
         "When a user's task matches a skill description below:\n"
-        "1. Use the `read` tool to load the SKILL.md at the given location\n"
-        "2. Follow the instructions in the SKILL.md to execute the task\n"
-        "3. Use the available tools (exec, read, write, edit, etc.) as needed\n\n"
+        "1. Check whether an executable tool is already registered for the matched skill\n"
+        "2. Prefer approved provider, memory, web, UI, and session tools for execution\n"
+        "3. If no executable tool exists, rely on the skill metadata to decide whether to continue or ask for more input\n\n"
         "SKILL SELECTION GUIDANCE:\n"
         "- Check 'use_when' conditions to confirm the skill applies\n"
         "- Check 'avoid_when' conditions to ensure you're using the right skill\n"

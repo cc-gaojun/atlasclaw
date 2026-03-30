@@ -11,6 +11,7 @@ import pytest
 
 from app.atlasclaw.channels import ChannelConnection, ChannelRegistry
 from app.atlasclaw.channels.handlers import WebSocketHandler
+from app.atlasclaw.channels.models import InboundMessage
 from app.atlasclaw.channels.manager import ChannelManager
 
 
@@ -186,12 +187,11 @@ class TestChannelManager:
                 "enabled": True,
             }
             
-            # Note: enable_connection calls initialize_connection which fails
-            # because base connect() returns False
+            # enable_connection now returns once DB state flips and
+            # background initialization has been scheduled.
             result = await self.manager.enable_connection("user-123", "websocket", "conn-123")
             
-            # Result is False because initialization fails
-            assert result is False
+            assert result is True
 
     @pytest.mark.asyncio
     async def test_disable_connection(self):
@@ -215,3 +215,59 @@ class TestChannelManager:
             result = await self.manager.disable_connection("user-123", "websocket", "conn-123")
             
             assert result is True
+
+    def test_build_channel_session_key_uses_sender_for_direct_messages(self):
+        message = InboundMessage(
+            message_id="msg-1",
+            sender_id="ext-user-1",
+            sender_name="External User",
+            chat_id="dm-chat-1",
+            channel_type="feishu",
+            content="hello",
+            metadata={"chat_type": "p2p"},
+        )
+
+        session_key = self.manager._build_channel_session_key(
+            owner_user_id="owner-1",
+            channel_type="feishu",
+            connection_id="conn-1",
+            message=message,
+        )
+
+        assert session_key == "agent:main:user:owner-1:feishu:conn-1:dm:ext-user-1"
+
+    def test_build_channel_session_key_shares_group_session_by_chat_id(self):
+        first = InboundMessage(
+            message_id="msg-1",
+            sender_id="ext-user-1",
+            sender_name="User 1",
+            chat_id="group-42",
+            channel_type="dingtalk",
+            content="hello",
+            metadata={"conversation_type": "2"},
+        )
+        second = InboundMessage(
+            message_id="msg-2",
+            sender_id="ext-user-2",
+            sender_name="User 2",
+            chat_id="group-42",
+            channel_type="dingtalk",
+            content="world",
+            metadata={"conversation_type": "2"},
+        )
+
+        first_key = self.manager._build_channel_session_key(
+            owner_user_id="owner-1",
+            channel_type="dingtalk",
+            connection_id="conn-1",
+            message=first,
+        )
+        second_key = self.manager._build_channel_session_key(
+            owner_user_id="owner-1",
+            channel_type="dingtalk",
+            connection_id="conn-1",
+            message=second,
+        )
+
+        assert first_key == second_key
+        assert first_key == "agent:main:user:owner-1:dingtalk:conn-1:group:group-42"
