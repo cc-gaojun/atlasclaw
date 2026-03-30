@@ -10,13 +10,20 @@
   },
   "login": {
     "title": "AtlasClaw Login",
-    "welcome": "Welcome",
+    "welcome": "Welcome to AtlasClaw",
+    "subtitle": "Login to your account to continue",
     "username": "Username",
+    "usernamePlaceholder": "Email or Username",
     "password": "Password",
     "submit": "Login",
     "submitting": "Logging in...",
     "emptyFields": "Username and password cannot be empty",
-    "failed": "Login failed"
+    "failed": "Login failed",
+    "togglePassword": "Show/hide password",
+    "rememberMe": "Remember me",
+    "forgotPassword": "Forgot password?",
+    "noAccount": "Don't have an account?",
+    "signUp": "Sign Up"
   },
   "logout": {
     "title": "Logout"

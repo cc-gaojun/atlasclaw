@@ -10,13 +10,20 @@
   },
   "login": {
     "title": "AtlasClaw 登录",
-    "welcome": "欢迎登录",
+    "welcome": "欢迎登录 AtlasClaw",
+    "subtitle": "登录您的账户以继续",
     "username": "用户名",
+    "usernamePlaceholder": "邮箱或用户名",
     "password": "密码",
     "submit": "登录",
     "submitting": "登录中...",
     "emptyFields": "用户名和密码不能为空",
-    "failed": "登录失败"
+    "failed": "登录失败",
+    "togglePassword": "显示/隐藏密码",
+    "rememberMe": "记住我",
+    "forgotPassword": "忘记密码?",
+    "noAccount": "还没有账户?",
+    "signUp": "注册"
   },
   "logout": {
     "title": "退出登录"
