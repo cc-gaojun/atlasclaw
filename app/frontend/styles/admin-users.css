@@ -257,6 +257,11 @@
   color: #475569;
 }
 
+.user-role-pill.custom {
+  background: #ecfeff;
+  color: #0f766e;
+}
+
 .user-status-badge.enabled {
   color: #047857;
 }

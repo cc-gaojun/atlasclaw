@@ -10,7 +10,7 @@ import { installAuthFetchInterceptor, checkAuth } from './auth.js'
 import { loadConfig } from './config.js'
 import { initI18n, updatePageTranslations, updateContainerTranslations } from './i18n.js'
 import { renderSidebar } from './components/sidebar.js'
-import { renderHeader, updateHeaderTitle, updateHeaderTitleText } from './components/header.js'
+import { renderHeader, updateHeaderControls, updateHeaderTitle, updateHeaderTitleText } from './components/header.js'
 import { getAgentInfo } from './api-client.js'
 
 /**
@@ -51,12 +51,21 @@ const routes = [
     loader: () => import('./pages/admin-users.js'),
     auth: true,
     title: 'admin.title'
+  },
+  {
+    path: '/admin/roles',
+    loader: () => import('./pages/role-management.js'),
+    auth: true,
+    title: 'roles.title'
   }
 ]
 
 // Store auth info globally for components that need it
 let currentAuthInfo = null
 let currentAgentInfo = null
+let sidebarCollapsedPreference = false
+
+const SIDEBAR_COLLAPSED_STORAGE_KEY = 'atlasclaw_sidebar_collapsed'
 
 /**
  * Get current authenticated user info
@@ -64,6 +73,46 @@ let currentAgentInfo = null
  */
 export function getAuthInfo() {
   return currentAuthInfo
+}
+
+function isChatRoute(path = window.location.pathname) {
+  return path === '/'
+}
+
+function loadSidebarCollapsedPreference() {
+  try {
+    return localStorage.getItem(SIDEBAR_COLLAPSED_STORAGE_KEY) === 'true'
+  } catch (error) {
+    console.warn('[App] Failed to load sidebar preference:', error)
+    return false
+  }
+}
+
+function saveSidebarCollapsedPreference() {
+  try {
+    localStorage.setItem(SIDEBAR_COLLAPSED_STORAGE_KEY, String(sidebarCollapsedPreference))
+  } catch (error) {
+    console.warn('[App] Failed to save sidebar preference:', error)
+  }
+}
+
+function applySidebarLayout(path = window.location.pathname) {
+  const shouldShowChatControls = isChatRoute(path)
+  const shouldCollapseSidebar = shouldShowChatControls && sidebarCollapsedPreference
+
+  document.body.classList.toggle('sidebar-collapsed', shouldCollapseSidebar)
+  updateHeaderControls({
+    visible: shouldShowChatControls,
+    isSidebarCollapsed: shouldCollapseSidebar,
+    onToggleSidebar: toggleSidebarCollapsedPreference,
+    onNewChat: handleNewChatClick
+  })
+}
+
+async function toggleSidebarCollapsedPreference() {
+  sidebarCollapsedPreference = !sidebarCollapsedPreference
+  saveSidebarCollapsedPreference()
+  applySidebarLayout(window.__spaRouter?.getCurrentPath?.() || window.location.pathname)
 }
 
 /**
@@ -91,6 +140,8 @@ export async function initApp() {
       })
       window.__atlasclawProfileSyncBound = true
     }
+
+    sidebarCollapsedPreference = loadSidebarCollapsedPreference()
 
     // 3. Load runtime config
     await loadConfig()
@@ -126,6 +177,7 @@ export async function initApp() {
       }
     }
 
+    applySidebarLayout(window.location.pathname)
     updatePageTranslations()
 
     // 6. Setup global link interception for SPA navigation
@@ -135,6 +187,8 @@ export async function initApp() {
     const router = createRouter(routes, {
       contentContainer: document.getElementById('page-content'),
       onBeforeRoute: (path, route) => {
+        applySidebarLayout(path)
+
         // Update header title
         if (path === '/' && currentAgentInfo?.name) {
           updateHeaderTitleText(currentAgentInfo.name)

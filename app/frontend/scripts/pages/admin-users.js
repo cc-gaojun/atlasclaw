@@ -10,6 +10,7 @@ let totalUsers = 0
 let currentRoleFilter = 'all'
 let currentStatusFilter = 'all'
 let currentFetchedUsers = []
+let availableRoles = []
 let searchDebounceTimer = null
 
 let usersTableBody = null
@@ -51,12 +52,7 @@ const PAGE_HTML = `
       <div class="user-toolbar-filters">
         <label class="user-filter-pill">
           <span data-i18n="admin.roleFilter">Role</span>
-          <select id="roleFilterSelect">
-            <option value="all" data-i18n="admin.roleAll">All</option>
-            <option value="admin" data-i18n="admin.roleAdmin">Admin</option>
-            <option value="user" data-i18n="admin.roleUser">User</option>
-            <option value="viewer" data-i18n="admin.roleViewer">Viewer</option>
-          </select>
+          <select id="roleFilterSelect"></select>
         </label>
 
         <label class="user-filter-pill">
@@ -139,11 +135,7 @@ const PAGE_HTML = `
                 <span class="multi-select-text placeholder" data-i18n="admin.rolesPlaceholder">Select roles...</span>
                 <span class="multi-select-arrow">&#9662;</span>
               </div>
-              <div class="multi-select-dropdown hidden">
-                <label class="multi-select-option"><input type="checkbox" name="role" value="admin"><span data-i18n="admin.roleAdmin">Admin</span></label>
-                <label class="multi-select-option"><input type="checkbox" name="role" value="user"><span data-i18n="admin.roleUser">User</span></label>
-                <label class="multi-select-option"><input type="checkbox" name="role" value="viewer"><span data-i18n="admin.roleViewer">Viewer</span></label>
-              </div>
+              <div class="multi-select-dropdown hidden" id="rolesMultiSelectDropdown"></div>
             </div>
           </div>
         </div>
@@ -204,6 +196,72 @@ function rolesArrayToDict(arr) {
   return result
 }
 
+function getFallbackRoles() {
+  return [
+    { identifier: 'admin', name: translateOrFallback('admin.roleAdmin', 'Admin'), is_builtin: true },
+    { identifier: 'user', name: translateOrFallback('admin.roleUser', 'User'), is_builtin: true },
+    { identifier: 'viewer', name: translateOrFallback('admin.roleViewer', 'Viewer'), is_builtin: true }
+  ]
+}
+
+function getRoleLabel(identifier) {
+  const role = availableRoles.find(entry => entry.identifier === identifier)
+  if (role?.name) return role.name
+  if (identifier === 'admin') return translateOrFallback('admin.roleAdmin', 'Admin')
+  if (identifier === 'viewer') return translateOrFallback('admin.roleViewer', 'Viewer')
+  if (identifier === 'user') return translateOrFallback('admin.roleUser', 'User')
+  return identifier
+}
+
+function renderRoleFilterOptions() {
+  if (!roleFilterSelect) return
+  const options = [
+    `<option value="all" data-i18n="admin.roleAll">${translateOrFallback('admin.roleAll', 'All')}</option>`,
+    ...availableRoles.map(role => `<option value="${escapeHtml(role.identifier)}">${escapeHtml(role.name)}</option>`)
+  ]
+  roleFilterSelect.innerHTML = options.join('')
+  if (![ 'all', ...availableRoles.map(role => role.identifier) ].includes(currentRoleFilter)) {
+    currentRoleFilter = 'all'
+  }
+  roleFilterSelect.value = currentRoleFilter
+}
+
+function renderRolesMultiSelectOptions() {
+  const dropdown = container?.querySelector('#rolesMultiSelectDropdown')
+  if (!dropdown) return
+  dropdown.innerHTML = availableRoles.map(role => `
+    <label class="multi-select-option">
+      <input type="checkbox" name="role" value="${escapeHtml(role.identifier)}">
+      <span>${escapeHtml(role.name)}</span>
+    </label>
+  `).join('')
+}
+
+async function loadAvailableRoles() {
+  try {
+    const response = await fetch('/api/roles?page=1&page_size=100')
+    if (!response.ok) {
+      await handleApiError(response)
+      availableRoles = getFallbackRoles()
+    } else {
+      const data = await response.json()
+      availableRoles = Array.isArray(data.roles) && data.roles.length
+        ? data.roles.map(role => ({
+          identifier: role.identifier,
+          name: role.name,
+          is_builtin: role.is_builtin === true
+        }))
+        : getFallbackRoles()
+    }
+  } catch (error) {
+    console.warn('[AdminUsers] Failed to load roles:', error)
+    availableRoles = getFallbackRoles()
+  }
+
+  renderRoleFilterOptions()
+  renderRolesMultiSelectOptions()
+}
+
 function escapeHtml(str) {
   if (!str) return ''
   const div = document.createElement('div')
@@ -222,12 +280,11 @@ function formatStatusText(isActive) {
 }
 
 function getPrimaryRole(user) {
-  if (user.is_admin) return translateOrFallback('admin.roleAdmin', 'Admin')
+  if (user.is_admin) return getRoleLabel('admin')
   const roles = rolesDictToArray(user.roles)
-  if (roles.includes('viewer')) return translateOrFallback('admin.roleViewer', 'Viewer')
-  if (roles.includes('user')) return translateOrFallback('admin.roleUser', 'User')
-  if (roles.includes('admin')) return translateOrFallback('admin.roleAdmin', 'Admin')
-  return translateOrFallback('admin.roleUser', 'User')
+  if (!roles.length) return getRoleLabel('user')
+  const matchingRole = availableRoles.find(role => roles.includes(role.identifier))
+  return matchingRole?.name || getRoleLabel(roles[0])
 }
 
 function getUserCardId(user) {
@@ -280,14 +337,15 @@ function initRolesMultiSelect() {
   if (!multiSelect) return
   const display = multiSelect.querySelector('.multi-select-display')
   const dropdown = multiSelect.querySelector('.multi-select-dropdown')
-  const checkboxes = multiSelect.querySelectorAll('input[type="checkbox"]')
 
   addTrackedListener(display, 'click', event => {
     event.stopPropagation()
     dropdown.classList.toggle('hidden')
   })
 
-  checkboxes.forEach(checkbox => addTrackedListener(checkbox, 'change', updateRolesDisplay))
+  addTrackedListener(dropdown, 'change', event => {
+    if (event.target.matches('input[type="checkbox"]')) updateRolesDisplay()
+  })
 
   documentClickHandler = event => {
     if (!multiSelect.contains(event.target)) dropdown.classList.add('hidden')
@@ -463,6 +521,7 @@ function getRoleVariant(user) {
   const roles = rolesDictToArray(user.roles)
   if (user.is_admin || roles.includes('admin')) return 'admin'
   if (roles.includes('viewer')) return 'viewer'
+  if (roles.length && !roles.includes('user')) return 'custom'
   return 'user'
 }
 
@@ -820,6 +879,7 @@ export async function mount(containerEl, { params, route } = {}) {
   deleteModal = container.querySelector('#deleteModal')
 
   setupEventListeners()
+  await loadAvailableRoles()
   updateContainerTranslations(container)
   await loadUsers(currentPage, currentSearch)
   console.log('[AdminUsersPage] Mounted')
@@ -850,6 +910,7 @@ export async function unmount() {
   currentRoleFilter = 'all'
   currentStatusFilter = 'all'
   currentFetchedUsers = []
+  availableRoles = []
   usersTableBody = null
   paginationInfo = null
   paginationBtns = null

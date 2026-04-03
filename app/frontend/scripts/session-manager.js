@@ -3,7 +3,7 @@
  * Manage session lifecycle and persistence
  */
 
-import { createThreadSession } from './api-client.js';
+import { createThreadSession, getSessionHistory } from './api-client.js';
 
 const SESSION_KEY_STORAGE = 'atlasclaw_session_key';
 
@@ -73,6 +73,20 @@ export function hasSession() {
  * @returns {Promise<string>} New session key
  */
 export async function startNewSession(archive = true, params = {}) {
+    const activeSessionKey = getSessionKey();
+
+    if (activeSessionKey) {
+        try {
+            const historyPayload = await getSessionHistory(activeSessionKey);
+            const messages = Array.isArray(historyPayload?.messages) ? historyPayload.messages : [];
+            if (messages.length === 0) {
+                return activeSessionKey;
+            }
+        } catch (error) {
+            console.warn('[Session] Failed to inspect active session history before creating a new thread:', error);
+        }
+    }
+
     // Clear storage and create a brand-new thread while preserving history entries
     void archive;
     sessionStorage.removeItem(SESSION_KEY_STORAGE);

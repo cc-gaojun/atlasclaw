@@ -288,6 +288,13 @@ class UserService:
         return user
 
     @staticmethod
+    async def count_users_with_role(session: AsyncSession, role_identifier: str) -> int:
+        """Count users currently assigned to a role identifier."""
+        result = await session.execute(select(UserModel))
+        users = result.scalars().all()
+        return sum(1 for user in users if (user.roles or {}).get(role_identifier) is True)
+
+    @staticmethod
     def to_user_info(user: UserModel) -> Dict[str, Any]:
         """Convert User model to UserInfo format for auth.
 

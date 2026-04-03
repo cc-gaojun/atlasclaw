@@ -15,6 +15,7 @@ from app.atlasclaw.api.channels import router, set_channel_manager
 from app.atlasclaw.channels import ChannelRegistry
 from app.atlasclaw.channels.handlers import WebSocketHandler
 from app.atlasclaw.channels.manager import ChannelManager
+from app.atlasclaw.auth.models import UserInfo
 from app.atlasclaw.db import init_database
 from app.atlasclaw.db.database import DatabaseConfig
 
@@ -23,6 +24,17 @@ from app.atlasclaw.db.database import DatabaseConfig
 def app():
     """Create test FastAPI application."""
     app = FastAPI()
+
+    @app.middleware("http")
+    async def inject_admin_user(request, call_next):
+        request.state.user_info = UserInfo(
+            user_id="channel-admin",
+            display_name="Channel Admin",
+            extra={"is_admin": True},
+            auth_type="local",
+        )
+        return await call_next(request)
+
     app.include_router(router)
     return app
 

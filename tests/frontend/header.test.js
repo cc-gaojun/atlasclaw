@@ -35,6 +35,16 @@ describe('header.js', () => {
     expect(container.querySelector('a[href="/admin/users"]')).toBeNull()
   })
 
+  test('renderHeader shows role management link for admins', async () => {
+    const { renderHeader } = await import('../../app/frontend/scripts/components/header.js')
+
+    const container = document.getElementById('header')
+    renderHeader(container, { authInfo: { username: 'admin', is_admin: true } })
+
+    expect(container.querySelector('a[href="/admin/users"]')).not.toBeNull()
+    expect(container.querySelector('a[href="/admin/roles"]')).not.toBeNull()
+  })
+
   test('header avatar updates when profile change event is dispatched', async () => {
     const { renderHeader } = await import('../../app/frontend/scripts/components/header.js')
 
@@ -54,5 +64,34 @@ describe('header.js', () => {
     expect(avatarImage).not.toBeNull()
     expect(avatarImage.getAttribute('src')).toBe('/user-content/avatars/alice.png')
     expect(container.querySelector('.dropdown-username').textContent).toBe('Alice Chen')
+  })
+
+  test('chat header controls render and trigger callbacks', async () => {
+    const onToggleSidebar = jest.fn(async () => {})
+    const onNewChat = jest.fn(async () => {})
+    const { renderHeader, updateHeaderControls } = await import('../../app/frontend/scripts/components/header.js')
+
+    const container = document.getElementById('header')
+    renderHeader(container, { authInfo: { username: 'alice', is_admin: false } })
+    updateHeaderControls({
+      visible: true,
+      isSidebarCollapsed: false,
+      onToggleSidebar,
+      onNewChat
+    })
+
+    const sidebarToggleBtn = container.querySelector('#headerSidebarToggleBtn')
+    const newChatBtn = container.querySelector('#headerNewChatBtn')
+
+    expect(sidebarToggleBtn).not.toBeNull()
+    expect(newChatBtn).not.toBeNull()
+
+    sidebarToggleBtn.click()
+    newChatBtn.click()
+
+    await Promise.resolve()
+
+    expect(onToggleSidebar).toHaveBeenCalledTimes(1)
+    expect(onNewChat).toHaveBeenCalledTimes(1)
   })
 })

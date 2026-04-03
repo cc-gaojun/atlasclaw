@@ -344,7 +344,7 @@ class TestUserCRUDAPI:
         )
 
         assert resp.status_code == 403
-        assert "admin" in resp.json()["detail"].lower()
+        assert "users.create" in resp.json()["detail"].lower()
 
         _cleanup_manager(manager)
 
@@ -384,6 +384,79 @@ class TestUserCRUDAPI:
         )
 
         assert resp.status_code == 403
+
+        _cleanup_manager(manager)
+
+    def test_user_with_assign_roles_can_manage_role_assignments_only(self, tmp_path):
+        """Role assigners can update roles without broader user-edit privileges."""
+        manager = _init_database_sync(tmp_path)
+        client = _build_client(tmp_path, _get_auth_config())
+        admin_token = _login_as(client, "admin", "adminpass123")
+        admin_headers = {"AtlasClaw-Authenticate": admin_token}
+
+        create_assigner_resp = client.post(
+            "/api/users",
+            json={
+                "username": "assigner",
+                "password": "assignerpass123",
+                "display_name": "Assigner",
+                "email": "assigner@test.com",
+                "roles": {},
+                "is_active": True,
+                "is_admin": False,
+            },
+            headers=admin_headers,
+        )
+        assert create_assigner_resp.status_code == 201
+        assigner_id = create_assigner_resp.json()["id"]
+
+        create_role_resp = client.post(
+            "/api/roles",
+            json={
+                "name": "Role Assigner",
+                "identifier": "role_assigner",
+                "description": "Can view users and assign roles.",
+                "permissions": {
+                    "users": {
+                        "view": True,
+                        "assign_roles": True,
+                    },
+                },
+                "is_active": True,
+            },
+            headers=admin_headers,
+        )
+        assert create_role_resp.status_code == 201
+
+        assign_role_resp = client.put(
+            f"/api/users/{assigner_id}",
+            json={"roles": {"role_assigner": True}},
+            headers=admin_headers,
+        )
+        assert assign_role_resp.status_code == 200
+
+        assigner_token = _login_as(client, "assigner", "assignerpass123")
+        assigner_headers = {"AtlasClaw-Authenticate": assigner_token}
+
+        list_users_resp = client.get("/api/users?search=regularuser", headers=assigner_headers)
+        assert list_users_resp.status_code == 200
+        regular_user_id = list_users_resp.json()["users"][0]["id"]
+
+        assign_viewer_resp = client.put(
+            f"/api/users/{regular_user_id}",
+            json={"roles": {"viewer": True}},
+            headers=assigner_headers,
+        )
+        assert assign_viewer_resp.status_code == 200
+        assert assign_viewer_resp.json()["roles"]["viewer"] is True
+
+        edit_profile_resp = client.put(
+            f"/api/users/{regular_user_id}",
+            json={"display_name": "Should Not Work"},
+            headers=assigner_headers,
+        )
+        assert edit_profile_resp.status_code == 403
+        assert "users.edit" in edit_profile_resp.json()["detail"].lower()
 
         _cleanup_manager(manager)
 
