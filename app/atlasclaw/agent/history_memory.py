@@ -75,19 +75,70 @@ class HistoryMemoryCoordinator:
             for part in parts:
                 part_kind = getattr(part, "part_kind", "")
                 part_content = getattr(part, "content", None)
-                if not part_content:
-                    continue
                 if part_kind == "system-prompt":
+                    if not part_content:
+                        continue
                     expanded.append({"role": "system", "content": str(part_content)})
                     continue
                 if part_kind == "user-prompt":
+                    if not part_content:
+                        continue
                     expanded.append({"role": "user", "content": str(part_content)})
+                    continue
+                if part_kind in {"tool-return", "tool_return", "tool-result", "tool_result"}:
+                    tool_name = str(getattr(part, "tool_name", getattr(part, "name", "")) or "").strip()
+                    tool_call_id = str(
+                        getattr(
+                            part,
+                            "tool_call_id",
+                            getattr(part, "toolCallId", getattr(part, "id", "")),
+                        )
+                        or ""
+                    ).strip()
+                    payload = part_content
+                    if payload is None:
+                        payload = str(getattr(part, "text", "") or "").strip()
+                    if payload is None:
+                        continue
+                    if isinstance(payload, str) and not payload.strip():
+                        continue
+                    item = {
+                        "role": "tool",
+                        "content": payload,
+                    }
+                    if tool_name:
+                        item["tool_name"] = tool_name
+                    if tool_call_id:
+                        item["tool_call_id"] = tool_call_id
+                    expanded.append(item)
             return expanded
 
         if kind == "response":
-            content = self._extract_message_content(msg)
-            if content:
-                return [{"role": "assistant", "content": content}]
+            text_chunks: list[str] = []
+            tool_calls: list[dict[str, Any]] = []
+            for part in parts:
+                part_kind = getattr(part, "part_kind", "")
+                part_content = getattr(part, "content", None)
+                if part_kind == "thinking":
+                    continue
+                if part_kind in {"text", ""}:
+                    if part_content:
+                        text_chunks.append(str(part_content))
+                    continue
+                if part_kind in {"tool-call", "tool_call"}:
+                    tool_calls.append(
+                        {
+                            "id": str(getattr(part, "tool_call_id", getattr(part, "id", "")) or "").strip(),
+                            "name": str(getattr(part, "tool_name", getattr(part, "name", "")) or "").strip(),
+                            "args": getattr(part, "args", getattr(part, "arguments", {})) or {},
+                        }
+                    )
+            content = "".join(text_chunks).strip()
+            if content or tool_calls:
+                item: dict[str, Any] = {"role": "assistant", "content": content}
+                if tool_calls:
+                    item["tool_calls"] = tool_calls
+                return [item]
         return []
 
     def build_message_history(self, transcript: list[Any]) -> list[dict]:

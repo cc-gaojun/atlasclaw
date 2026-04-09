@@ -40,6 +40,11 @@ from app.atlasclaw.tools.registration import register_builtin_tools
 from app.atlasclaw.tools.catalog import ToolProfile
 from app.atlasclaw.agent.runner import AgentRunner
 from app.atlasclaw.agent.prompt_builder import PromptBuilder, PromptBuilderConfig
+from app.atlasclaw.agent.context_pruning import (
+    ContextPruningSettings as AgentContextPruningSettings,
+    SoftTrimConfig as AgentContextPruningSoftTrimConfig,
+    HardClearConfig as AgentContextPruningHardClearConfig,
+)
 from app.atlasclaw.core.config import get_config, get_config_path
 from app.atlasclaw.core.provider_registry import ServiceProviderRegistry
 from app.atlasclaw.core.provider_scanner import ProviderScanner
@@ -76,7 +81,7 @@ from app.atlasclaw.heartbeat.store import HeartbeatStateStore
 from app.atlasclaw.session.context import ChatType, SessionKey, SessionScope
 from app.atlasclaw.core.token_health_store import TokenHealthStore
 from app.atlasclaw.core.token_interceptor import TokenHealthInterceptor
-from app.atlasclaw.core.token_pool import TokenEntry, TokenPool
+from app.atlasclaw.core.token_pool import TokenEntry, TokenHealth, TokenPool
 from app.atlasclaw.db.database import DatabaseConfig, init_database, get_db_manager
 from app.atlasclaw.db.orm.user import UserService
 from app.atlasclaw.db.orm.model_config import ModelConfigService
@@ -463,9 +468,11 @@ async def lifespan(app: FastAPI):
             print(f"[AtlasClaw] Warning: Failed to load model configs from database: {e}")
 
     health_store = TokenHealthStore(workspace_path)
-    restored_health = health_store.load()
-    for token_id, health in restored_health.items():
-        token_pool.restore_health(token_id, health)
+    # Product requirement: clear token unhealthy state on every restart so one bad
+    # session does not poison subsequent runs.
+    for token_id in list(token_pool.tokens.keys()):
+        token_pool.restore_health(token_id, TokenHealth())
+    health_store.save(token_pool.export_health_status())
 
     token_policy = DynamicTokenPolicy(
         token_pool,
@@ -496,6 +503,26 @@ async def lifespan(app: FastAPI):
 
     # Create AgentRunner
     prompt_builder = PromptBuilder(PromptBuilderConfig(workspace_path=workspace_path))
+    runtime_pruning_config = config.context_pruning
+    runtime_context_pruning_settings = AgentContextPruningSettings(
+        mode=runtime_pruning_config.mode,
+        ttl_ms=runtime_pruning_config.ttl_ms,
+        keep_last_assistants=runtime_pruning_config.keep_last_assistants,
+        soft_trim_ratio=runtime_pruning_config.soft_trim_ratio,
+        hard_clear_ratio=runtime_pruning_config.hard_clear_ratio,
+        min_prunable_tool_chars=runtime_pruning_config.min_prunable_tool_chars,
+        tools_allow=list(runtime_pruning_config.tools.allow),
+        tools_deny=list(runtime_pruning_config.tools.deny),
+        soft_trim=AgentContextPruningSoftTrimConfig(
+            max_chars=runtime_pruning_config.soft_trim.max_chars,
+            head_chars=runtime_pruning_config.soft_trim.head_chars,
+            tail_chars=runtime_pruning_config.soft_trim.tail_chars,
+        ),
+        hard_clear=AgentContextPruningHardClearConfig(
+            enabled=runtime_pruning_config.hard_clear.enabled,
+            placeholder=runtime_pruning_config.hard_clear.placeholder,
+        ),
+    )
     _agent_runner = AgentRunner(
         agent=agent,
         session_manager=_session_manager,
@@ -509,6 +536,7 @@ async def lifespan(app: FastAPI):
         token_interceptor=token_interceptor,
         agent_factory=_build_agent_for,
         tool_gate_model_classifier_enabled=config.tool_gate.enable_model_classifier,
+        context_pruning_settings=runtime_context_pruning_settings,
     )
 
     

@@ -192,6 +192,27 @@ manager = SessionManager(agents_dir="/path/to/legacy-agents")
                 await asyncio.sleep(self._io_retry_backoff_seconds * (attempt + 1))
         return []
 
+    @staticmethod
+    def _is_retryable_replace_error(exc: BaseException) -> bool:
+        """Return whether metadata atomic-replace failure is transient and retryable."""
+        if not isinstance(exc, OSError):
+            return False
+        winerror = int(getattr(exc, "winerror", 0) or 0)
+        errno = int(getattr(exc, "errno", 0) or 0)
+        return winerror in {32, 33} or errno in {13}
+
+    async def _replace_file_with_retry(self, src: Path, dst: Path) -> None:
+        """Atomically replace a file with bounded retry to tolerate transient file locks."""
+        max_attempts = max(1, int(self._io_retry_attempts))
+        for attempt in range(max_attempts):
+            try:
+                await aiofiles.os.replace(src, dst)
+                return
+            except Exception as exc:
+                if not self._is_retryable_replace_error(exc) or attempt + 1 >= max_attempts:
+                    raise
+                await asyncio.sleep(self._io_retry_backoff_seconds * (attempt + 1))
+
     async def _enforce_archive_budget(self) -> None:
         """Ensure archived transcript size stays within configured byte budget."""
         budget = int(self._archive_budget_bytes or 0)
@@ -253,7 +274,7 @@ manager = SessionManager(agents_dir="/path/to/legacy-agents")
 
         async with aiofiles.open(tmp_path, "w", encoding="utf-8") as f:
             await f.write(json.dumps(data, ensure_ascii=False, indent=2))
-        await aiofiles.os.replace(tmp_path, metadata_path)
+        await self._replace_file_with_retry(tmp_path, metadata_path)
     
     def _get_transcript_path(self, session: SessionMetadata) -> Path:
         """Return the transcript file path for a session."""

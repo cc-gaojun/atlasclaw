@@ -11,7 +11,76 @@ from app.atlasclaw.agent.runner_prompt_context import collect_tools_snapshot
 def test_collect_tools_snapshot_prefers_deps_extra_snapshot() -> None:
     deps = SimpleNamespace(extra={"tools_snapshot": [{"name": "web_search", "description": "search web"}]})
     snapshot = collect_tools_snapshot(agent=object(), deps=deps)
-    assert snapshot == [{"name": "web_search", "description": "search web"}]
+    assert snapshot == [
+        {"name": "web_search", "description": "search web", "capability_class": "web_search"}
+    ]
+
+
+def test_collect_tools_snapshot_keeps_authoritative_snapshot_without_remerge() -> None:
+    agent = SimpleNamespace(
+        tools=[
+            {"name": "web_search", "description": "search web"},
+            {"name": "web_fetch", "description": "fetch web page"},
+        ]
+    )
+    deps = SimpleNamespace(
+        extra={
+            "tools_snapshot": [{"name": "web_search", "description": "search web"}],
+            "tools_snapshot_authoritative": True,
+        }
+    )
+    snapshot = collect_tools_snapshot(agent=agent, deps=deps)
+    assert snapshot == [
+        {"name": "web_search", "description": "search web", "capability_class": "web_search"}
+    ]
+
+
+def test_collect_tools_snapshot_merges_agent_tools_when_snapshot_not_authoritative() -> None:
+    agent = SimpleNamespace(
+        tools=[
+            {"name": "web_search", "description": "search web"},
+            {"name": "web_fetch", "description": "fetch web page"},
+        ]
+    )
+    deps = SimpleNamespace(
+        extra={
+            "tools_snapshot": [{"name": "web_search", "description": "search web"}],
+            "tools_snapshot_authoritative": False,
+        }
+    )
+    snapshot = collect_tools_snapshot(agent=agent, deps=deps)
+    names = [item["name"] for item in snapshot]
+    assert names == ["web_search", "web_fetch"]
+
+
+def test_collect_tools_snapshot_preserves_normalized_metadata_from_deps() -> None:
+    deps = SimpleNamespace(
+        extra={
+            "tools_snapshot": [
+                {
+                    "name": "cmp_list_pending",
+                    "description": "List pending CMP approvals",
+                    "source": "provider",
+                    "provider_type": "smartcmp",
+                    "group_ids": ["group:cmp"],
+                    "capability_class": "provider:smartcmp",
+                    "priority": 150,
+                }
+            ]
+        }
+    )
+    snapshot = collect_tools_snapshot(agent=object(), deps=deps)
+    assert snapshot == [
+        {
+            "name": "cmp_list_pending",
+            "description": "List pending CMP approvals",
+            "source": "provider",
+            "provider_type": "smartcmp",
+            "group_ids": ["group:cmp"],
+            "capability_class": "provider:smartcmp",
+            "priority": 150,
+        }
+    ]
 
 
 def test_collect_tools_snapshot_reads_pydantic_ai_toolsets() -> None:
@@ -94,6 +163,7 @@ def test_collect_tools_snapshot_infers_md_skill_capability() -> None:
             "name": "summarize_skill_run",
             "description": "Run summarize skill",
             "category": "skill",
+            "source": "md_skill",
             "capability_class": "skill",
         }
     ]

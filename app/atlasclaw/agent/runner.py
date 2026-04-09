@@ -13,6 +13,7 @@ Supported hooks:
 
 from __future__ import annotations
 
+from collections import OrderedDict
 from typing import TYPE_CHECKING, Any, Optional
 
 from app.atlasclaw.agent.compaction import CompactionConfig, CompactionPipeline
@@ -40,13 +41,26 @@ if TYPE_CHECKING:
 class AgentRunner(RunnerExecutionMixin, RunnerToolGateMixin, RunnerToolEvidenceMixin):
     """Execute a streaming PydanticAI agent with runtime safeguards."""
 
-    REASONING_ONLY_ESCALATION_SECONDS = 6.0
-    REASONING_ONLY_MAX_RETRIES = 1
-    MODEL_FIRST_NODE_TIMEOUT_SECONDS = 8.0
-    MODEL_NEXT_NODE_TIMEOUT_SECONDS = 20.0
+    REASONING_ONLY_ESCALATION_SECONDS = 4.0
+    REASONING_ONLY_MAX_RETRIES = 0
+    MODEL_FIRST_NODE_TIMEOUT_SECONDS = 12.0
+    MODEL_NEXT_NODE_TIMEOUT_SECONDS = 24.0
+    PROVIDER_FAST_PATH_FIRST_NODE_TIMEOUT_SECONDS = 60.0
+    PROVIDER_FAST_PATH_NEXT_NODE_TIMEOUT_SECONDS = 60.0
+    TOKEN_FAILOVER_MAX_ATTEMPTS = 1
     TOOL_GATE_MUST_USE_MIN_CONFIDENCE = 0.85
     TOOL_GATE_SHORT_CIRCUIT_MIN_CONFIDENCE = 0.55
-    TOOL_GATE_CLASSIFIER_TIMEOUT_SECONDS = 8.0
+    TOOL_GATE_CLASSIFIER_TIMEOUT_SECONDS = 2.0
+    TOOL_HINT_RANKER_TIMEOUT_SECONDS = 1.0
+    TOOL_HINT_RANKER_MIN_METADATA_CONFIDENCE = 0.3
+    TOOL_HINT_TOP_K = 3
+    TOOL_METADATA_PROVIDER_TOP_K = 3
+    TOOL_METADATA_SKILL_TOP_K = 6
+    TOOL_POLICY_MAX_RETRIES = 1
+    TOOL_GATE_DECISION_CACHE_TTL_SECONDS = 300.0
+    TOOL_GATE_DECISION_CACHE_MAX_ENTRIES = 512
+    TURN_TOOLSET_CACHE_TTL_SECONDS = 300.0
+    TURN_TOOLSET_CACHE_MAX_ENTRIES = 256
 
     def __init__(
         self,
@@ -80,7 +94,15 @@ class AgentRunner(RunnerExecutionMixin, RunnerToolGateMixin, RunnerToolEvidenceM
         self.agent = agent
         self.sessions = session_manager
         self.prompt_builder = prompt_builder or PromptBuilder(PromptBuilderConfig())
-        self.compaction = compaction or CompactionPipeline(CompactionConfig())
+        if compaction is not None:
+            self.compaction = compaction
+        else:
+            compaction_config = CompactionConfig()
+            builder_config = getattr(self.prompt_builder, "config", None)
+            workspace_path = str(getattr(builder_config, "workspace_path", "") or "").strip()
+            if workspace_path:
+                compaction_config.workspace_path = workspace_path
+            self.compaction = CompactionPipeline(compaction_config)
         self.hooks = hook_system
         self.queue = session_queue
         self.session_manager_router = session_manager_router
@@ -96,3 +118,8 @@ class AgentRunner(RunnerExecutionMixin, RunnerToolGateMixin, RunnerToolEvidenceM
         self.title_generator = SessionTitleGenerator()
         self.hook_runtime = hook_runtime
         self.tool_gate = ToolNecessityGate()
+        self._tool_gate_decision_cache: OrderedDict[str, tuple[float, dict[str, Any]]] = OrderedDict()
+        self._turn_toolset_cache: OrderedDict[
+            str,
+            tuple[float, list[dict[str, Any]], list[dict[str, Any]], bool],
+        ] = OrderedDict()

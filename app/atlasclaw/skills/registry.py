@@ -19,7 +19,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Any, Optional, TYPE_CHECKING
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from pydantic_ai import RunContext
 
 from app.atlasclaw.skills.frontmatter import parse_frontmatter
@@ -28,6 +28,7 @@ from app.atlasclaw.skills.md_tool_runtime import (
     should_override_location,
 )
 from app.atlasclaw.core.deps import SkillDeps
+from app.atlasclaw.tools.catalog import GROUP_TOOLS
 
 if TYPE_CHECKING:
     from pydantic_ai import Agent
@@ -97,6 +98,10 @@ class SkillMetadata(BaseModel):
     location: str = "built-in"
     provider_type: Optional[str] = None
     instance_required: bool = False
+    source: str = "builtin"
+    group_ids: list[str] = Field(default_factory=list)
+    capability_class: str = ""
+    priority: int = 100
 
 
 @dataclass
@@ -166,6 +171,7 @@ class SkillRegistry:
         self._skills: dict[str, tuple[SkillMetadata, Callable]] = {}
         self._md_skills: dict[str, MdSkillEntry] = {}
         self._md_skill_tools: dict[str, set[str]] = {}
+        self._md_tool_profiles: dict[str, dict[str, Any]] = {}
         self._workspace = workspace
         self._allow_script_execution = allow_script_execution
     
@@ -176,11 +182,20 @@ class SkillRegistry:
     ) -> None:
         """Register an executable skill handler."""
         self._skills[metadata.name] = (metadata, handler)
-    
+        if metadata.source in {"md_skill", "provider"}:
+            self._md_tool_profiles[metadata.name] = {
+                "source": metadata.source,
+                "provider_type": metadata.provider_type or "",
+                "group_ids": list(metadata.group_ids or []),
+                "capability_class": metadata.capability_class or "",
+                "priority": int(metadata.priority or 100),
+            }
+
     def unregister(self, name: str) -> bool:
         """Unregister a skill by name."""
         if name in self._skills:
             del self._skills[name]
+            self._md_tool_profiles.pop(name, None)
             return True
         return False
     
@@ -198,6 +213,10 @@ class SkillRegistry:
                 "location": meta.location,
                 "provider_type": meta.provider_type,
                 "instance_required": meta.instance_required,
+                "source": meta.source,
+                "group_ids": list(meta.group_ids),
+                "capability_class": meta.capability_class,
+                "priority": meta.priority,
             }
             for meta, _ in self._skills.values()
         ]
@@ -220,10 +239,59 @@ class SkillRegistry:
                 "location": meta.location,
                 "provider_type": meta.provider_type,
                 "instance_required": meta.instance_required,
+                "source": meta.source,
+                "group_ids": list(meta.group_ids),
+                "capability_class": meta.capability_class,
+                "priority": meta.priority,
             }
             for meta, _ in self._skills.values()
             if meta.name not in md_derived
         ]
+
+    def tools_snapshot(self) -> list[dict]:
+        """Return normalized executable-tool metadata for runtime filtering."""
+        normalized: list[dict] = []
+        for meta, _ in self._skills.values():
+            source = self._resolve_tool_source(meta)
+            provider_type = str(meta.provider_type or "").strip()
+            capability_class = self._resolve_capability_class(meta, source)
+            group_ids = self._resolve_group_ids(meta, source, provider_type)
+            record = {
+                "name": meta.name,
+                "description": meta.description,
+                "source": source,
+                "provider_type": provider_type,
+                "group_ids": group_ids,
+                "capability_class": capability_class,
+                "priority": int(meta.priority or 100),
+                "category": meta.category,
+                "location": meta.location,
+            }
+            normalized.append(record)
+        return normalized
+
+    def tool_groups_snapshot(self) -> dict[str, list[str]]:
+        """Return merged group->tool mappings for built-ins and provider/md tools."""
+        available = {item["name"] for item in self.tools_snapshot()}
+        merged: dict[str, set[str]] = {}
+
+        for group_id, members in GROUP_TOOLS.items():
+            for tool_name in members:
+                if tool_name not in available:
+                    continue
+                merged.setdefault(group_id, set()).add(tool_name)
+
+        for tool in self.tools_snapshot():
+            tool_name = str(tool.get("name", "")).strip()
+            if not tool_name:
+                continue
+            for group_id in tool.get("group_ids", []):
+                normalized_group = str(group_id or "").strip()
+                if not normalized_group:
+                    continue
+                merged.setdefault(normalized_group, set()).add(tool_name)
+
+        return {key: sorted(values) for key, values in merged.items()}
     
     def to_tool_definitions(self) -> list[dict]:
         """Convert registered skills into tool-definition dictionaries."""
@@ -606,5 +674,68 @@ register name
         
 """
         return list(self._skills.keys())
+
+    def _resolve_tool_source(self, meta: SkillMetadata) -> str:
+        explicit_source = str(meta.source or "").strip().lower()
+        if explicit_source in {"builtin", "provider", "md_skill"}:
+            return explicit_source
+
+        category = str(meta.category or "").strip().lower()
+        if category.startswith("builtin:"):
+            return "builtin"
+        if str(meta.provider_type or "").strip():
+            return "provider"
+        if meta.name in self._md_tool_profiles:
+            profile_source = str(self._md_tool_profiles[meta.name].get("source", "")).strip()
+            if profile_source in {"builtin", "provider", "md_skill"}:
+                return profile_source
+        return "md_skill"
+
+    def _resolve_capability_class(self, meta: SkillMetadata, source: str) -> str:
+        explicit = str(meta.capability_class or "").strip()
+        if explicit:
+            return explicit
+
+        provider_type = str(meta.provider_type or "").strip()
+        if provider_type:
+            return f"provider:{provider_type}"
+
+        name = str(meta.name or "").strip().lower()
+        if name in {"web_search", "web_fetch"}:
+            return name
+        if name == "browser":
+            return "browser"
+        if name == "openmeteo_weather":
+            return "weather"
+        if source == "md_skill":
+            return "skill"
+        return ""
+
+    def _resolve_group_ids(
+        self,
+        meta: SkillMetadata,
+        source: str,
+        provider_type: str,
+    ) -> list[str]:
+        group_ids = [str(item).strip() for item in (meta.group_ids or []) if str(item).strip()]
+        category = str(meta.category or "").strip().lower()
+        if category.startswith("builtin:"):
+            group_name = category.split(":", 1)[1].strip()
+            if group_name:
+                group_ids.append(f"group:{group_name}")
+        if provider_type:
+            group_ids.append(f"group:{provider_type}")
+        if source == "builtin":
+            group_ids.append("group:atlasclaw")
+
+        deduped: list[str] = []
+        seen: set[str] = set()
+        for item in group_ids:
+            normalized = item if item.startswith("group:") else f"group:{item}"
+            if normalized in seen:
+                continue
+            seen.add(normalized)
+            deduped.append(normalized)
+        return deduped
 
 

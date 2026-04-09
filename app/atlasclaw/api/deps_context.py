@@ -144,12 +144,26 @@ def build_scoped_deps(
             user_id=user_info.user_id,
         )
 
+    tools_snapshot_builder = getattr(ctx.skill_registry, "tools_snapshot", None)
+    if callable(tools_snapshot_builder):
+        tools_snapshot = tools_snapshot_builder()
+    else:
+        tools_snapshot = ctx.skill_registry.snapshot()
+
+    tool_groups_builder = getattr(ctx.skill_registry, "tool_groups_snapshot", None)
+    if callable(tool_groups_builder):
+        tool_groups_snapshot = tool_groups_builder()
+    else:
+        tool_groups_snapshot = {}
+
     deps_extra = {
         "_service_provider_registry": ctx.service_provider_registry,
         "available_providers": ctx.available_providers,
         "provider_instances": ctx.provider_instances,
         "provider_config": provider_config or {},
-        "tools_snapshot": ctx.skill_registry.snapshot(),
+        "tools_snapshot": tools_snapshot,
+        "tools_snapshot_authoritative": False,
+        "tool_groups_snapshot": tool_groups_snapshot,
         "skills_snapshot": ctx.skill_registry.snapshot_builtins(),
         "md_skills_snapshot": ctx.skill_registry.md_snapshot(),
         "work_dir": str(

@@ -10,6 +10,8 @@ from typing import Optional
 GROUP_FS = "group:fs"
 GROUP_RUNTIME = "group:runtime"
 GROUP_WEB = "group:web"
+GROUP_AUTOMATION = "group:automation"
+GROUP_ATLASCLAW = "group:atlasclaw"
 GROUP_MEMORY = "group:memory"
 GROUP_SESSIONS = "group:sessions"
 GROUP_UI = "group:ui"
@@ -17,9 +19,11 @@ GROUP_PROVIDERS = "group:providers"
 
 # Tools included in each logical group.
 GROUP_TOOLS: dict[str, list[str]] = {
-    GROUP_FS: [],
-    GROUP_RUNTIME: [],
+    GROUP_RUNTIME: ["exec", "process"],
+    GROUP_FS: ["read", "write", "edit"],
     GROUP_WEB: ["web_search", "web_fetch", "openmeteo_weather"],
+    GROUP_UI: ["browser"],
+    GROUP_AUTOMATION: [],
     GROUP_MEMORY: ["memory_search", "memory_get"],
     GROUP_SESSIONS: [
         "sessions_list",
@@ -29,12 +33,43 @@ GROUP_TOOLS: dict[str, list[str]] = {
         "subagents",
         "session_status",
     ],
-    GROUP_UI: ["browser"],
     GROUP_PROVIDERS: ["list_provider_instances", "select_provider_instance"],
 }
 
+
+def _dedupe(items: list[str]) -> list[str]:
+    result: list[str] = []
+    seen: set[str] = set()
+    for item in items:
+        if item in seen:
+            continue
+        seen.add(item)
+        result.append(item)
+    return result
+
+
+GROUP_TOOLS[GROUP_ATLASCLAW] = _dedupe(
+    [
+        *GROUP_TOOLS[GROUP_RUNTIME],
+        *GROUP_TOOLS[GROUP_FS],
+        *GROUP_TOOLS[GROUP_WEB],
+        *GROUP_TOOLS[GROUP_UI],
+        *GROUP_TOOLS[GROUP_AUTOMATION],
+        *GROUP_TOOLS[GROUP_MEMORY],
+        *GROUP_TOOLS[GROUP_SESSIONS],
+        *GROUP_TOOLS[GROUP_PROVIDERS],
+    ]
+)
+
 # Flattened list of all registered tool names.
-ALL_TOOLS: list[str] = [tool for tools in GROUP_TOOLS.values() for tool in tools]
+ALL_TOOLS: list[str] = _dedupe(
+    [
+        tool
+        for group, tools in GROUP_TOOLS.items()
+        if group != GROUP_ATLASCLAW
+        for tool in tools
+    ]
+)
 
 
 class ToolProfile(str, Enum):
@@ -52,6 +87,7 @@ PROFILE_DEFINITIONS: dict[ToolProfile, list[str]] = {
     ToolProfile.CODING: [
         GROUP_FS,
         GROUP_RUNTIME,
+        GROUP_WEB,
         GROUP_SESSIONS,
         GROUP_MEMORY,
         GROUP_UI,
@@ -62,7 +98,7 @@ PROFILE_DEFINITIONS: dict[ToolProfile, list[str]] = {
         "sessions_send",
         "session_status",
     ],
-    ToolProfile.FULL: list(GROUP_TOOLS.keys()),  # Enable every built-in tool group.
+    ToolProfile.FULL: [GROUP_ATLASCLAW],
 }
 
 

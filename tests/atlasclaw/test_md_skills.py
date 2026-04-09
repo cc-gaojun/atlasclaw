@@ -371,29 +371,6 @@ class TestSkillRegistryMdLoading:
         names = reg.list_md_skills()
         assert set(names) == {"jira", "gerrit"}
 
-    def test_register_to_agent_excludes_md(self, tmp_path):
-        """register_to_agent 不注册 MD Skills"""
-        _write_skill_md(
-            tmp_path / "info" / "SKILL.md",
-            ["name: info", "description: md skill"],
-        )
-        reg = SkillRegistry()
-        reg.register(
-            SkillMetadata(name="py-tool", description="py"),
-            lambda: None,
-        )
-        reg.load_from_directory(str(tmp_path))
-
-        registered_tools = []
-
-        class MockAgent:
-            def tool(self, handler, name=None):
-                registered_tools.append(name)
-
-        reg.register_to_agent(MockAgent())
-        assert "py-tool" in registered_tools
-        assert "info" not in registered_tools
-
     def test_valid_name_passes(self, tmp_path):
         """合法名称验证通过"""
         _write_skill_md(
@@ -557,16 +534,14 @@ class TestPromptBuilderMdSkills:
         defaults.update(overrides)
         return PromptBuilder(PromptBuilderConfig(**defaults))
 
-    def test_basic_xml_format(self):
-        """基础 XML 格式验证"""
+    def test_basic_compact_format(self):
+        """基础 compact 索引格式验证"""
         b = self._builder()
         output = b._build_md_skills_index([_make_md_skill()])
 
-        assert "<available_skills>" in output
-        assert "<skill>" in output
-        assert "<name>jira</name>" in output
-        assert "<description>Manage Jira</description>" in output
-        assert "<location>" in output
+        assert "## Skills" in output
+        assert "Format: `name | description | file_path`" in output
+        assert "- `jira` | Manage Jira | `/skills/jira/SKILL.md`" in output
 
     def test_empty_list_returns_empty(self):
         """空列表返回空字符串"""
@@ -605,7 +580,7 @@ class TestPromptBuilderMdSkills:
         skills = [_make_md_skill(name=f"s{i:03d}", description=f"d{i}") for i in range(25)]
         output = b._build_md_skills_index(skills)
 
-        assert output.count("<skill>") <= 20
+        assert output.count("- `s") <= 20
 
     def test_budget_with_truncation_comment(self):
         """总预算超出时附加截断注释"""
@@ -625,30 +600,30 @@ class TestPromptBuilderMdSkills:
         b = self._builder(mode=PromptMode.FULL)
         output = b.build(md_skills=[_make_md_skill()])
 
-        assert "<available_skills>" in output
+        assert "## Skills" in output
 
     def test_minimal_mode_excludes(self):
         """MINIMAL 模式不包含 MD Skills"""
         b = self._builder(mode=PromptMode.MINIMAL)
         output = b.build(md_skills=[_make_md_skill()])
 
-        assert "## MD Skills" not in output
+        assert "## Skills" not in output
 
     def test_none_mode_excludes(self):
         """NONE 模式不包含 MD Skills"""
         b = self._builder(mode=PromptMode.NONE)
         output = b.build(md_skills=[_make_md_skill()])
 
-        assert "<available_skills>" not in output
+        assert "## Skills" not in output
 
     def test_three_instructions_present(self):
         """核心执行指令和选择指导存在"""
         b = self._builder()
         output = b._build_md_skills_index([_make_md_skill()])
 
-        assert "check whether an executable tool is already registered" in output.lower()
-        assert "skill selection guidance" in output.lower()  # New guidance section
-        assert "use_when" in output.lower() or "avoid_when" in output.lower()
+        assert "call the `read` tool" in output
+        assert "Do not assume the full skill file is already loaded in context." in output
+        assert "Format: `name | description | file_path`" in output
 
     def test_path_compression(self):
         """路径压缩：用户主目录替换为 ~"""
@@ -660,17 +635,17 @@ class TestPromptBuilderMdSkills:
         assert "~/.atlasclaw/skills/jira/SKILL.md" in output
         assert home not in output
 
-    def test_md_skills_after_executable_skills(self):
-        """MD Skills 索引段位于可执行 Skills 之后"""
+    def test_md_skills_before_executable_skills(self):
+        """MD Skills 索引段位于可执行 Skills 之前"""
         b = self._builder()
         exe_skills = [{"name": "py-tool", "description": "exec", "location": "built-in", "category": "utility"}]
         output = b.build(skills=exe_skills, md_skills=[_make_md_skill()])
 
-        # Check that both sections exist (note: exe_skills uses <available_skills> tag too)
-        md_pos = output.find("## MD Skills")
-        available_pos = output.find("<available_skills>")
-        assert md_pos != -1, "MD Skills section should be present"
-        assert available_pos != -1, "available_skills tag should be present"
+        md_pos = output.find("## Skills")
+        built_in_pos = output.find("## Built-in Tools (Use ONLY if no MD Skill matches)")
+        assert md_pos != -1, "Skills section should be present"
+        assert built_in_pos != -1, "Built-in tools section should be present"
+        assert md_pos < built_in_pos, "MD skills index should appear before built-in tools"
 
 
 # ======================================================================
@@ -761,7 +736,7 @@ class TestConfigSchema:
         assert cfg.md_skills_desc_max_chars == 200
         assert cfg.md_skills_index_max_chars == 3000
         assert cfg.md_skills_max_file_bytes == 262144
-        assert cfg.allow_script_execution is False
+        assert cfg.allow_script_execution is True
 
     def test_custom_values(self):
         """自定义值验证"""
@@ -782,19 +757,19 @@ class TestConfigSchema:
         assert pbcfg.md_skills_max_index_chars == 3000
 
 
-class TestBuiltinToolHardening:
-    """Built-in tool registration hardening tests."""
+class TestBuiltinToolCatalog:
+    """Built-in tool registration and group coverage tests."""
 
-    def test_full_profile_excludes_high_risk_tools(self):
+    def test_full_profile_includes_runtime_and_fs_tools(self):
         tools = ToolCatalog.get_tools_by_profile(ToolProfile.FULL)
 
-        for tool_name in ("read", "write", "edit", "delete_file", "exec", "process"):
-            assert tool_name not in tools
+        for tool_name in ("read", "write", "edit", "exec", "process"):
+            assert tool_name in tools
 
-    def test_register_builtin_tools_excludes_high_risk_tools(self):
+    def test_register_builtin_tools_includes_runtime_and_fs_tools(self):
         reg = SkillRegistry()
         registered = register_builtin_tools(reg, profile=ToolProfile.FULL)
 
-        for tool_name in ("read", "write", "edit", "delete_file", "exec", "process"):
-            assert tool_name not in registered
-            assert reg.get(tool_name) is None
+        for tool_name in ("read", "write", "edit", "exec", "process"):
+            assert tool_name in registered
+            assert reg.get(tool_name) is not None

@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
+import logging
 from typing import Any
 
 from app.atlasclaw.agent.tool_gate_models import CapabilityMatchResult, ToolEnforcementOutcome, ToolGateDecision
@@ -10,6 +12,8 @@ from app.atlasclaw.agent.stream import StreamEvent
 from app.atlasclaw.hooks.runtime import HookRuntime
 from app.atlasclaw.hooks.runtime_models import HookEventType
 from app.atlasclaw.session.context import SessionKey
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -33,6 +37,7 @@ class RuntimeEventDispatcher:
         self.hooks = hooks
         self.queue = session_queue
         self.hook_runtime = hook_runtime
+        self._background_event_tasks: set[asyncio.Task[Any]] = set()
 
     async def trigger_llm_input(
         self,
@@ -51,7 +56,7 @@ class RuntimeEventDispatcher:
         }
         if self.hooks:
             await self.hooks.trigger("llm_input", payload)
-        await self._emit_runtime_event(
+        self._emit_runtime_event_background(
             HookEventType.LLM_REQUESTED,
             session_key=session_key,
             run_id=run_id,
@@ -87,7 +92,7 @@ class RuntimeEventDispatcher:
         run_id: str,
         user_message: str,
     ) -> None:
-        await self._emit_runtime_event(
+        self._emit_runtime_event_background(
             HookEventType.RUN_STARTED,
             session_key=session_key,
             run_id=run_id,
@@ -101,7 +106,7 @@ class RuntimeEventDispatcher:
         run_id: str,
         user_message: str,
     ) -> None:
-        await self._emit_runtime_event(
+        self._emit_runtime_event_background(
             HookEventType.MESSAGE_RECEIVED,
             session_key=session_key,
             run_id=run_id,
@@ -199,13 +204,13 @@ class RuntimeEventDispatcher:
             "reason": decision.reason,
             "policy": decision.policy.value,
         }
-        await self._emit_runtime_event(
+        self._emit_runtime_event_background(
             HookEventType.TOOL_GATE_EVALUATED,
             session_key=session_key,
             run_id=run_id,
             payload=payload,
         )
-        await self._emit_runtime_event(
+        self._emit_runtime_event_background(
             HookEventType.TOOL_GATE_REQUIRED if decision.needs_tool else HookEventType.TOOL_GATE_OPTIONAL,
             session_key=session_key,
             run_id=run_id,
@@ -229,19 +234,83 @@ class RuntimeEventDispatcher:
             "reason": match_result.reason,
             "confidence": decision.confidence,
         }
-        await self._emit_runtime_event(
+        self._emit_runtime_event_background(
             HookEventType.TOOL_MATCHER_RESOLVED,
             session_key=session_key,
             run_id=run_id,
             payload=payload,
         )
         if match_result.missing_capabilities:
-            await self._emit_runtime_event(
+            self._emit_runtime_event_background(
                 HookEventType.TOOL_MATCHER_MISSING_CAPABILITY,
                 session_key=session_key,
                 run_id=run_id,
                 payload=payload,
             )
+
+    async def trigger_hint_ranking_started(
+        self,
+        *,
+        session_key: str,
+        run_id: str,
+        candidate_count: int,
+        provider_hint_count: int,
+        skill_hint_count: int,
+    ) -> None:
+        self._emit_runtime_event_background(
+            HookEventType.HINT_RANKING_STARTED,
+            session_key=session_key,
+            run_id=run_id,
+            payload={
+                "candidate_count": int(candidate_count),
+                "provider_hint_count": int(provider_hint_count),
+                "skill_hint_count": int(skill_hint_count),
+            },
+        )
+
+    async def trigger_hint_ranking_completed(
+        self,
+        *,
+        session_key: str,
+        run_id: str,
+        preferred_provider_types: list[str],
+        preferred_capability_classes: list[str],
+        preferred_tool_names: list[str],
+        confidence: float,
+        reason: str,
+        elapsed_ms: int,
+    ) -> None:
+        self._emit_runtime_event_background(
+            HookEventType.HINT_RANKING_COMPLETED,
+            session_key=session_key,
+            run_id=run_id,
+            payload={
+                "preferred_provider_types": list(preferred_provider_types),
+                "preferred_capability_classes": list(preferred_capability_classes),
+                "preferred_tool_names": list(preferred_tool_names),
+                "confidence": float(confidence),
+                "reason": str(reason or ""),
+                "elapsed_ms": int(elapsed_ms),
+            },
+        )
+
+    async def trigger_hint_ranking_fallback(
+        self,
+        *,
+        session_key: str,
+        run_id: str,
+        reason: str,
+        elapsed_ms: int,
+    ) -> None:
+        self._emit_runtime_event_background(
+            HookEventType.HINT_RANKING_FALLBACK,
+            session_key=session_key,
+            run_id=run_id,
+            payload={
+                "reason": str(reason or ""),
+                "elapsed_ms": int(elapsed_ms),
+            },
+        )
 
     async def trigger_tool_enforcement_blocked(
         self,
@@ -360,7 +429,7 @@ class RuntimeEventDispatcher:
 
             if self.hooks:
                 await self.hooks.trigger("before_tool_call", {"tool": tool_name})
-            await self._emit_runtime_event(
+            self._emit_runtime_event_background(
                 HookEventType.TOOL_STARTED,
                 session_key=session_key,
                 run_id=run_id,
@@ -372,7 +441,7 @@ class RuntimeEventDispatcher:
 
             if self.hooks:
                 await self.hooks.trigger("after_tool_call", {"tool": tool_name})
-            await self._emit_runtime_event(
+            self._emit_runtime_event_background(
                 HookEventType.TOOL_COMPLETED,
                 session_key=session_key,
                 run_id=run_id,
@@ -407,4 +476,39 @@ class RuntimeEventDispatcher:
             agent_id=parsed.agent_id,
             payload=payload,
         )
+
+    def _emit_runtime_event_background(
+        self,
+        event_type: HookEventType,
+        *,
+        session_key: str,
+        run_id: str,
+        payload: dict[str, Any],
+    ) -> None:
+        """Schedule runtime-event emission without blocking the main request path."""
+        if self.hook_runtime is None:
+            return
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return
+        task = loop.create_task(
+            self._emit_runtime_event(
+                event_type,
+                session_key=session_key,
+                run_id=run_id,
+                payload=dict(payload),
+            )
+        )
+        self._background_event_tasks.add(task)
+        task.add_done_callback(self._on_background_event_done)
+
+    def _on_background_event_done(self, task: asyncio.Task[Any]) -> None:
+        self._background_event_tasks.discard(task)
+        if task.cancelled():
+            return
+        try:
+            task.result()
+        except Exception as exc:  # pragma: no cover - defensive logging only
+            logger.warning("Runtime event background dispatch failed: %s", exc)
 

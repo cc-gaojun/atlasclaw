@@ -4,10 +4,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from fnmatch import fnmatch
+import time
 from typing import Callable, Optional
 
 CHARS_PER_TOKEN_ESTIMATE = 4
 IMAGE_CHAR_ESTIMATE = 8_000
+TOOL_RESULT_ROLES = {"tool", "toolresult", "tool_result"}
 
 
 @dataclass
@@ -25,15 +28,57 @@ class HardClearConfig:
 
 @dataclass
 class ContextPruningSettings:
+    mode: str = "cache-ttl"
+    ttl_ms: int = 5 * 60 * 1000
     keep_last_assistants: int = 3
     soft_trim_ratio: float = 0.30
     hard_clear_ratio: float = 0.50
     min_prunable_tool_chars: int = 50_000
+    tools_allow: list[str] = field(default_factory=list)
+    tools_deny: list[str] = field(default_factory=list)
     soft_trim: SoftTrimConfig = field(default_factory=SoftTrimConfig)
     hard_clear: HardClearConfig = field(default_factory=HardClearConfig)
 
 
 DEFAULT_CONTEXT_PRUNING_SETTINGS = ContextPruningSettings()
+
+
+def should_apply_context_pruning(
+    *,
+    settings: Optional[ContextPruningSettings],
+    session: object = None,
+    now_ms: Optional[int] = None,
+) -> bool:
+    active_settings = settings or DEFAULT_CONTEXT_PRUNING_SETTINGS
+    mode = str(active_settings.mode or "").strip().lower()
+    if mode == "off":
+        return False
+    if mode != "cache-ttl":
+        return True
+
+    ttl_ms = max(0, int(active_settings.ttl_ms or 0))
+    if ttl_ms <= 0 or session is None:
+        return True
+
+    now = int(now_ms if isinstance(now_ms, int) and now_ms > 0 else time.time() * 1000)
+    last_touch = int(getattr(session, "_context_pruning_last_touch_at", 0) or 0)
+    if last_touch and now - last_touch < ttl_ms:
+        return False
+
+    setattr(session, "_context_pruning_last_touch_at", now)
+    return True
+
+
+def is_tool_prunable_by_settings(tool_name: str, settings: ContextPruningSettings) -> bool:
+    normalized = str(tool_name or "").strip().lower()
+    deny = [pattern.strip().lower() for pattern in settings.tools_deny if str(pattern).strip()]
+    allow = [pattern.strip().lower() for pattern in settings.tools_allow if str(pattern).strip()]
+
+    if deny and any(fnmatch(normalized, pattern) for pattern in deny):
+        return False
+    if allow:
+        return any(fnmatch(normalized, pattern) for pattern in allow)
+    return True
 
 
 def _estimate_message_chars(message: dict) -> int:
@@ -107,6 +152,10 @@ def _soft_trim_text(content: str, cfg: SoftTrimConfig) -> Optional[str]:
     )
 
 
+def _is_tool_result_role(role: str) -> bool:
+    return str(role or "").strip().lower() in TOOL_RESULT_ROLES
+
+
 def prune_context_messages(
     *,
     messages: list[dict],
@@ -117,6 +166,8 @@ def prune_context_messages(
     """Prune low-value tool payloads when context window pressure is high."""
 
     active_settings = settings or DEFAULT_CONTEXT_PRUNING_SETTINGS
+    if str(active_settings.mode or "").strip().lower() == "off":
+        return messages
     if not messages:
         return messages
     if context_window_tokens is None or context_window_tokens <= 0:
@@ -138,13 +189,13 @@ def prune_context_messages(
 
     def _tool_allowed(tool_name: str) -> bool:
         if is_tool_prunable is None:
-            return True
+            return is_tool_prunable_by_settings(tool_name, active_settings)
         return bool(is_tool_prunable(tool_name))
 
     for idx in range(prune_start, cutoff):
         msg = next_messages[idx]
         role = str(msg.get("role", "")).strip().lower()
-        if role != "tool":
+        if not _is_tool_result_role(role):
             continue
         metadata = msg.get("metadata", {})
         if isinstance(metadata, dict):
@@ -184,6 +235,9 @@ def prune_context_messages(
         return next_messages
 
     for idx in prunable_indexes:
+        ratio = float(total_chars) / float(char_window)
+        if ratio < active_settings.hard_clear_ratio:
+            break
         msg = next_messages[idx]
         content = msg.get("content", "")
         if not isinstance(content, str):
@@ -191,5 +245,6 @@ def prune_context_messages(
         msg_copy = dict(msg)
         msg_copy["content"] = active_settings.hard_clear.placeholder
         next_messages[idx] = msg_copy
+        total_chars += len(active_settings.hard_clear.placeholder) - len(content)
 
     return next_messages

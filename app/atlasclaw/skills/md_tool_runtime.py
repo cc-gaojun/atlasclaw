@@ -200,6 +200,7 @@ def register_executable_tools_from_md(
             logger=logger,
             tool_name=single_tool_name,
             entrypoint=single_entrypoint,
+            tool_id="default",
             entry=entry,
             skill_dir=skill_dir,
             registered=registered,
@@ -232,6 +233,7 @@ def register_executable_tools_from_md(
             tool_name=tool_name,
             entrypoint=entrypoint,
             tool_description=tool_description,
+            tool_id=tool_id,
             entry=entry,
             skill_dir=skill_dir,
             registered=registered,
@@ -253,6 +255,7 @@ def _register_md_tool_entry(
     skill_dir: Path,
     registered: set[str],
     tool_description: str = "",
+    tool_id: str = "",
     allow_script_execution: bool = False,
 ) -> None:
     module_path, attr_name = parse_entrypoint(entrypoint)
@@ -292,13 +295,106 @@ def _register_md_tool_entry(
         return
 
     description = tool_description if tool_description else entry.description
+    metadata = entry.metadata if isinstance(entry.metadata, dict) else {}
+    group_ids = _extract_group_ids(metadata, entry.provider, tool_id=tool_id)
+    capability_class = _extract_capability_class(metadata, provider_type, tool_id=tool_id)
+    priority = _extract_priority(metadata, tool_id=tool_id)
+    source = "provider" if provider_type else "md_skill"
     meta = skill_metadata_cls(
         name=tool_name,
         description=description,
-        category=str(entry.metadata.get("category", "skill")),
+        category=str(metadata.get("category", "skill")),
         location=entry.location,
         provider_type=provider_type,
-        instance_required=str(entry.metadata.get("instance_required", "")).lower() in ("1", "true", "yes"),
+        instance_required=str(metadata.get("instance_required", "")).lower() in ("1", "true", "yes"),
+        source=source,
+        group_ids=group_ids,
+        capability_class=capability_class,
+        priority=priority,
     )
     registry.register(meta, handler)
     registered.add(tool_name)
+
+
+def _extract_group_ids(
+    metadata: dict[str, Any],
+    provider_type: Optional[str],
+    *,
+    tool_id: str = "",
+) -> list[str]:
+    values: list[Any] = []
+    for key in ("group", "groups", "tool_group", "tool_groups"):
+        if key in metadata:
+            values.append(metadata.get(key))
+
+    if tool_id:
+        for key in (f"tool_{tool_id}_group", f"tool_{tool_id}_groups"):
+            if key in metadata:
+                values.append(metadata.get(key))
+
+    normalized: list[str] = []
+    seen: set[str] = set()
+
+    def _append(group: str) -> None:
+        name = str(group or "").strip()
+        if not name:
+            return
+        if not name.startswith("group:"):
+            name = f"group:{name}"
+        if name in seen:
+            return
+        seen.add(name)
+        normalized.append(name)
+
+    for value in values:
+        if isinstance(value, str):
+            _append(value)
+            continue
+        if isinstance(value, list):
+            for item in value:
+                _append(str(item))
+            continue
+        if isinstance(value, dict):
+            for group_name, members in value.items():
+                if not tool_id:
+                    continue
+                member_names: list[str] = []
+                if isinstance(members, str):
+                    member_names = [members]
+                elif isinstance(members, list):
+                    member_names = [str(item) for item in members]
+                if tool_id in member_names:
+                    _append(group_name)
+
+    if provider_type:
+        _append(provider_type)
+    return normalized
+
+
+def _extract_capability_class(
+    metadata: dict[str, Any],
+    provider_type: Optional[str],
+    *,
+    tool_id: str = "",
+) -> str:
+    if tool_id:
+        per_tool = str(metadata.get(f"tool_{tool_id}_capability_class", "") or "").strip()
+        if per_tool:
+            return per_tool
+    explicit = str(metadata.get("capability_class", "") or "").strip()
+    if explicit:
+        return explicit
+    normalized_provider = str(provider_type or "").strip()
+    if normalized_provider:
+        return f"provider:{normalized_provider}"
+    return "skill"
+
+
+def _extract_priority(metadata: dict[str, Any], *, tool_id: str = "") -> int:
+    candidate: Any = metadata.get("priority", 100)
+    if tool_id and f"tool_{tool_id}_priority" in metadata:
+        candidate = metadata.get(f"tool_{tool_id}_priority", 100)
+    try:
+        return int(candidate)
+    except (TypeError, ValueError):
+        return 100

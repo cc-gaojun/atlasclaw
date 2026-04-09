@@ -37,6 +37,10 @@ def event_loop():
 async def client() -> AsyncGenerator[httpx.AsyncClient, None]:
     """HTTP 客户端 fixture"""
     async with httpx.AsyncClient(base_url=TEST_SERVER_URL, timeout=60.0) as c:
+        try:
+            await c.get("/api/health")
+        except httpx.HTTPError:
+            pytest.skip(f"E2E server is not reachable at {TEST_SERVER_URL}")
         yield c
 
 

@@ -19,6 +19,7 @@ from app.atlasclaw.core.config_schema import (
     ModelConfig,
     AgentDefaultsConfig,
     ResetConfig,
+    ContextPruningConfig,
 )
 
 
@@ -77,6 +78,8 @@ class TestConfigSchema:
         assert config.model is not None
         assert config.agent_defaults is not None
         assert config.reset is not None
+        assert config.context_pruning is not None
+        assert config.context_pruning.mode == "cache-ttl"
         
     def test_model_config(self):
         """测试模型配置"""
@@ -106,6 +109,16 @@ class TestConfigSchema:
         )
         
         assert reset.daily_hour == 6
+
+    def test_context_pruning_config(self):
+        cfg = ContextPruningConfig(
+            mode="cache-ttl",
+            ttl_ms=1000,
+            tools={"allow": ["web_*"], "deny": ["web_fetch"]},
+        )
+        assert cfg.ttl_ms == 1000
+        assert cfg.tools.allow == ["web_*"]
+        assert cfg.tools.deny == ["web_fetch"]
 
 
 class TestConfigManager:

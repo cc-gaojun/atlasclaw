@@ -105,6 +105,7 @@ class PromptBuilder:
             config.workspace_path = str(Path(get_config().workspace.path).expanduser().resolve())
         self.config = config
         self._context_resolver = PromptContextResolver()
+        self._runtime_warnings: list[str] = []
     
     def build(
         self,
@@ -116,6 +117,7 @@ class PromptBuilder:
         tool_policy: Optional[dict] = None,
         user_info: Optional["UserInfo"] = None,
         provider_contexts: Optional[dict[str, dict]] = None,
+        context_window_tokens: Optional[int] = None,
     ) -> str:
         """
         Build the full system prompt for the current run.
@@ -132,6 +134,8 @@ class PromptBuilder:
         """
         if self.config.mode == PromptMode.NONE:
             return f"You are {self.config.agent_name}, {self.config.agent_description}."
+
+        self._runtime_warnings.clear()
         
         parts = []
         
@@ -178,7 +182,10 @@ class PromptBuilder:
             parts.append(self._build_documentation())
             
             # 8. Project bootstrap context
-            bootstrap = self._build_bootstrap(session=session)
+            bootstrap = self._build_bootstrap(
+                session=session,
+                context_window_tokens=context_window_tokens,
+            )
             if bootstrap:
                 parts.append(bootstrap)
             
@@ -203,6 +210,12 @@ class PromptBuilder:
         parts.append(self._build_runtime_info())
         
         return "\n\n".join(p for p in parts if p)
+
+    def consume_warnings(self) -> list[str]:
+        """Return and clear prompt-build runtime warnings."""
+        warnings = list(self._runtime_warnings)
+        self._runtime_warnings.clear()
+        return warnings
 
     def _build_target_md_skill(self, target_md_skill: dict[str, str]) -> str:
         return prompt_sections.build_target_md_skill(target_md_skill)
@@ -241,7 +254,12 @@ class PromptBuilder:
     def _build_documentation(self) -> str:
         return prompt_sections.build_documentation()
     
-    def _build_bootstrap(self, *, session: Optional[object] = None) -> str:
+    def _build_bootstrap(
+        self,
+        *,
+        session: Optional[object] = None,
+        context_window_tokens: Optional[int] = None,
+    ) -> str:
         """
 
 
@@ -264,20 +282,38 @@ inject Bootstrap
                 continue
             target_files.append(filename)
 
+        existing_target_files: list[str] = []
+        for filename in target_files:
+            file_path = workspace / filename
+            if not file_path.exists():
+                self._record_warning(f"Missing bootstrap file: {filename}")
+                continue
+            existing_target_files.append(filename)
+
         session_key = getattr(session, "session_key", None) if session is not None else None
+        budget_decision = self._context_resolver.resolve_budgets(
+            configured_total_budget=self.config.bootstrap_total_max_chars,
+            configured_per_file_budget=self.config.bootstrap_max_chars,
+            context_window_tokens=context_window_tokens,
+        )
         resolved_files = self._context_resolver.resolve(
             workspace=workspace,
-            filenames=target_files,
+            filenames=existing_target_files,
             session_key=str(session_key or ""),
-            total_budget=self.config.bootstrap_total_max_chars,
-            per_file_budget=self.config.bootstrap_max_chars,
+            total_budget=budget_decision.total_budget,
+            per_file_budget=budget_decision.per_file_budget,
         )
         for item in resolved_files:
             content = item.content
             if item.truncated:
+                self._record_warning(
+                    "Bootstrap context truncated by budget: "
+                    f"{item.filename} (per_file={budget_decision.per_file_budget}, total={budget_decision.total_budget})"
+                )
                 content = (
                     f"{content}\n...[Truncated by prompt budget "
-                    f"(per_file={self.config.bootstrap_max_chars}, total={self.config.bootstrap_total_max_chars})]"
+                    f"(per_file={budget_decision.per_file_budget}, total={budget_decision.total_budget}, "
+                    f"source={budget_decision.source})]"
                 )
             sections.append(f"### {item.filename}\n\n{content}")
         
@@ -289,6 +325,14 @@ inject Bootstrap
                 pass  # 
         
         return "\n\n".join(sections) if len(sections) > 2 else ""
+
+    def _record_warning(self, message: str) -> None:
+        normalized = str(message or "").strip()
+        if not normalized:
+            return
+        if normalized in self._runtime_warnings:
+            return
+        self._runtime_warnings.append(normalized)
     
     def is_new_workspace(self) -> bool:
         """

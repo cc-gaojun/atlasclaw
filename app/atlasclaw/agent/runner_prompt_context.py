@@ -7,7 +7,14 @@ import inspect
 from typing import Any, Optional
 
 
-def build_system_prompt(prompt_builder, session: Any, deps, *, agent: Optional[Any] = None) -> str:
+def build_system_prompt(
+    prompt_builder,
+    session: Any,
+    deps,
+    *,
+    agent: Optional[Any] = None,
+    context_window_tokens: Optional[int] = None,
+) -> str:
     """Build the runtime system prompt for the current session."""
     kwargs = {
         "session": session,
@@ -18,6 +25,7 @@ def build_system_prompt(prompt_builder, session: Any, deps, *, agent: Optional[A
         "tool_policy": collect_tool_policy(deps),
         "user_info": deps.user_info,
         "provider_contexts": collect_provider_contexts(deps),
+        "context_window_tokens": context_window_tokens,
     }
     build_fn = prompt_builder.build
     try:
@@ -97,15 +105,40 @@ def collect_tool_policy(deps) -> Optional[dict]:
     return value if isinstance(value, dict) else None
 
 
+def collect_tool_groups_snapshot(deps) -> dict[str, list[str]]:
+    """Read normalized tool-group snapshot from `deps.extra` if present."""
+    extra = deps.extra if isinstance(deps.extra, dict) else {}
+    value = extra.get("tool_groups_snapshot")
+    if not isinstance(value, dict):
+        return {}
+    normalized: dict[str, list[str]] = {}
+    for key, members in value.items():
+        group_id = str(key or "").strip()
+        if not group_id:
+            continue
+        if isinstance(members, list):
+            tool_names = [str(item or "").strip() for item in members if str(item or "").strip()]
+        else:
+            tool_names = []
+        normalized[group_id] = tool_names
+    return normalized
+
+
 def collect_tools_snapshot(*, agent: Any, deps=None) -> list[dict]:
     """Collect tool name and description pairs for prompt building."""
     extra = getattr(deps, "extra", {}) if deps is not None else {}
+    normalized_extra_tools: list[dict] = []
+    tools_snapshot_authoritative = False
     if isinstance(extra, dict):
+        tools_snapshot_authoritative = bool(extra.get("tools_snapshot_authoritative"))
         extra_tools = extra.get("tools_snapshot")
         if isinstance(extra_tools, list):
-            normalized = [item for item in extra_tools if isinstance(item, dict)]
-            if normalized:
-                return normalized
+            for item in extra_tools:
+                if not isinstance(item, dict):
+                    continue
+                payload = _normalize_snapshot_tool(item)
+                if payload:
+                    normalized_extra_tools.append(payload)
 
     skills_snapshot = collect_skills_snapshot(deps) if deps is not None else []
     md_skills_snapshot = collect_md_skills_snapshot(deps) if deps is not None else []
@@ -122,6 +155,10 @@ def collect_tools_snapshot(*, agent: Any, deps=None) -> list[dict]:
         description: Any,
         provider_type: Any = None,
         category: Any = None,
+        source: Any = None,
+        group_ids: Any = None,
+        capability_class: Any = None,
+        priority: Any = None,
     ) -> None:
         normalized_name = str(name or "").strip()
         if not normalized_name or normalized_name in seen_names:
@@ -138,6 +175,16 @@ def collect_tools_snapshot(*, agent: Any, deps=None) -> list[dict]:
             or indexed_meta.get("category", "")
             or ""
         ).strip()
+        normalized_source = str(
+            source
+            or indexed_meta.get("source", "")
+            or ""
+        ).strip()
+        resolved_group_ids = _normalize_group_ids(
+            group_ids
+            if group_ids is not None
+            else indexed_meta.get("group_ids", []),
+        )
         tool_record = {
             "name": normalized_name,
             "description": normalized_description,
@@ -146,18 +193,46 @@ def collect_tools_snapshot(*, agent: Any, deps=None) -> list[dict]:
             tool_record["provider_type"] = normalized_provider_type
         if normalized_category:
             tool_record["category"] = normalized_category
+        if normalized_source:
+            tool_record["source"] = normalized_source
+        if resolved_group_ids:
+            tool_record["group_ids"] = resolved_group_ids
+        resolved_priority = _normalize_priority(priority if priority is not None else indexed_meta.get("priority"))
+        if resolved_priority is not None:
+            tool_record["priority"] = resolved_priority
 
-        capability_class = _infer_capability_class(
+        explicit_capability_class = str(
+            capability_class
+            or indexed_meta.get("capability_class", "")
+            or ""
+        ).strip()
+        inferred_capability_class = _infer_capability_class(
             name=normalized_name,
             description=normalized_description,
             provider_type=normalized_provider_type,
             category=normalized_category,
         )
-        if capability_class:
-            tool_record["capability_class"] = capability_class
+        capability = explicit_capability_class or inferred_capability_class
+        if capability:
+            tool_record["capability_class"] = capability
 
         tools.append(tool_record)
         seen_names.add(normalized_name)
+
+    for tool in normalized_extra_tools:
+        _append_tool_record(
+            name=tool.get("name"),
+            description=tool.get("description", ""),
+            provider_type=tool.get("provider_type"),
+            category=tool.get("category"),
+            source=tool.get("source"),
+            group_ids=tool.get("group_ids"),
+            capability_class=tool.get("capability_class"),
+            priority=tool.get("priority"),
+        )
+
+    if tools_snapshot_authoritative and tools:
+        return tools
 
     for tool in _iter_tool_entries(agent):
         if isinstance(tool, dict):
@@ -165,6 +240,10 @@ def collect_tools_snapshot(*, agent: Any, deps=None) -> list[dict]:
             description = tool.get("description", "")
             provider_type = tool.get("provider_type")
             category = tool.get("category")
+            source = tool.get("source")
+            group_ids = tool.get("group_ids")
+            capability_class = tool.get("capability_class")
+            priority = tool.get("priority")
         else:
             name = getattr(tool, "name", None) or getattr(tool, "__name__", None)
             description = getattr(tool, "description", "") or getattr(tool, "__doc__", "") or ""
@@ -176,11 +255,31 @@ def collect_tools_snapshot(*, agent: Any, deps=None) -> list[dict]:
                 getattr(tool, "category", None)
                 or getattr(getattr(tool, "metadata", None), "category", None)
             )
+            source = (
+                getattr(tool, "source", None)
+                or getattr(getattr(tool, "metadata", None), "source", None)
+            )
+            group_ids = (
+                getattr(tool, "group_ids", None)
+                or getattr(getattr(tool, "metadata", None), "group_ids", None)
+            )
+            capability_class = (
+                getattr(tool, "capability_class", None)
+                or getattr(getattr(tool, "metadata", None), "capability_class", None)
+            )
+            priority = (
+                getattr(tool, "priority", None)
+                or getattr(getattr(tool, "metadata", None), "priority", None)
+            )
         _append_tool_record(
             name=name,
             description=description,
             provider_type=provider_type,
             category=category,
+            source=source,
+            group_ids=group_ids,
+            capability_class=capability_class,
+            priority=priority,
         )
 
     # Fallback/merge path: when pydantic-ai internal tool exposure is partial or missing,
@@ -193,6 +292,10 @@ def collect_tools_snapshot(*, agent: Any, deps=None) -> list[dict]:
             description=item.get("description", ""),
             provider_type=item.get("provider_type"),
             category=item.get("category"),
+            source=item.get("source"),
+            group_ids=item.get("group_ids", []),
+            capability_class=item.get("capability_class"),
+            priority=item.get("priority"),
         )
 
     return tools
@@ -243,6 +346,10 @@ def _build_skill_metadata_index(
         index[name] = {
             "provider_type": str(item.get("provider_type", "")).strip(),
             "category": str(item.get("category", "")).strip(),
+            "source": str(item.get("source", "")).strip(),
+            "group_ids": _normalize_group_ids(item.get("group_ids", [])),
+            "capability_class": str(item.get("capability_class", "")).strip(),
+            "priority": _normalize_priority(item.get("priority")),
         }
 
     for entry in md_skills_snapshot:
@@ -261,6 +368,10 @@ def _build_skill_metadata_index(
             index[tool_name] = {
                 "provider_type": provider_type,
                 "category": category,
+                "source": "provider" if provider_type else "md_skill",
+                "group_ids": _normalize_group_ids(metadata.get("group_ids", [])),
+                "capability_class": str(metadata.get("capability_class", "")).strip(),
+                "priority": _normalize_priority(metadata.get("priority")),
             }
 
     return index
@@ -318,3 +429,60 @@ def _infer_capability_class(
     if "skill" in lowered_description and lowered_name not in {"web_search", "web_fetch"}:
         return "skill"
     return ""
+
+
+def _normalize_snapshot_tool(item: dict[str, Any]) -> dict[str, Any]:
+    normalized = {
+        "name": str(item.get("name", "")).strip(),
+        "description": str(item.get("description", "")).strip(),
+    }
+    if not normalized["name"]:
+        return {}
+
+    provider_type = str(item.get("provider_type", "")).strip()
+    category = str(item.get("category", "")).strip()
+    source = str(item.get("source", "")).strip()
+    capability_class = str(item.get("capability_class", "")).strip()
+    group_ids = _normalize_group_ids(item.get("group_ids", []))
+    priority = _normalize_priority(item.get("priority"))
+
+    if provider_type:
+        normalized["provider_type"] = provider_type
+    if category:
+        normalized["category"] = category
+    if source:
+        normalized["source"] = source
+    if capability_class:
+        normalized["capability_class"] = capability_class
+    if group_ids:
+        normalized["group_ids"] = group_ids
+    if priority is not None:
+        normalized["priority"] = priority
+    return normalized
+
+
+def _normalize_group_ids(values: Any) -> list[str]:
+    if not isinstance(values, list):
+        values = [values] if values else []
+    result: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        normalized = str(value or "").strip()
+        if not normalized:
+            continue
+        if not normalized.startswith("group:"):
+            normalized = f"group:{normalized}"
+        if normalized in seen:
+            continue
+        seen.add(normalized)
+        result.append(normalized)
+    return result
+
+
+def _normalize_priority(value: Any) -> Optional[int]:
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None

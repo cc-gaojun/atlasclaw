@@ -108,10 +108,14 @@ class TokenPool:
         model: Optional[str] = None,
         *,
         strategy: str = "health",
+        exclude_token_ids: Optional[set[str]] = None,
     ) -> Optional[TokenEntry]:
         with self._lock:
             candidates: list[tuple[TokenEntry, TokenHealth]] = []
+            excluded = exclude_token_ids or set()
             for token_id, token in self.tokens.items():
+                if token_id in excluded:
+                    continue
                 if provider and token.provider != provider:
                     continue
                 if model and token.model != model:

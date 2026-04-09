@@ -93,6 +93,42 @@ class CompactionConfig(BaseModel):
     memory_flush_enabled: bool = True
 
 
+class ContextPruningToolConfig(BaseModel):
+    """Tool allow/deny rules for context pruning candidates."""
+
+    allow: list[str] = Field(default_factory=list)
+    deny: list[str] = Field(default_factory=list)
+
+
+class ContextPruningSoftTrimConfig(BaseModel):
+    """Soft-trim settings for oversized tool payloads."""
+
+    max_chars: int = Field(default=4_000, ge=1)
+    head_chars: int = Field(default=1_500, ge=1)
+    tail_chars: int = Field(default=1_500, ge=1)
+
+
+class ContextPruningHardClearConfig(BaseModel):
+    """Hard-clear settings for severe context pressure."""
+
+    enabled: bool = True
+    placeholder: str = Field(default="[Tool result cleared to save context space]")
+
+
+class ContextPruningConfig(BaseModel):
+    """Runtime context pruning configuration (OpenClaw-aligned)."""
+
+    mode: str = Field(default="cache-ttl", description="off | cache-ttl")
+    ttl_ms: int = Field(default=5 * 60 * 1000, ge=0)
+    keep_last_assistants: int = Field(default=3, ge=0)
+    soft_trim_ratio: float = Field(default=0.30, ge=0, le=1)
+    hard_clear_ratio: float = Field(default=0.50, ge=0, le=1)
+    min_prunable_tool_chars: int = Field(default=50_000, ge=0)
+    tools: ContextPruningToolConfig = Field(default_factory=ContextPruningToolConfig)
+    soft_trim: ContextPruningSoftTrimConfig = Field(default_factory=ContextPruningSoftTrimConfig)
+    hard_clear: ContextPruningHardClearConfig = Field(default_factory=ContextPruningHardClearConfig)
+
+
 class BlockChunkerConfig(BaseModel):
     """Streaming block chunking configuration."""
     min_chars: int = Field(default=800, ge=1, description="Minimum chunk size in characters")
@@ -421,6 +457,7 @@ class AtlasClawConfig(BaseModel):
     agent_defaults: AgentDefaultsConfig = Field(default_factory=AgentDefaultsConfig)
     messages: MessagesConfig = Field(default_factory=MessagesConfig)
     compaction: CompactionConfig = Field(default_factory=CompactionConfig)
+    context_pruning: ContextPruningConfig = Field(default_factory=ContextPruningConfig)
     block_chunker: BlockChunkerConfig = Field(default_factory=BlockChunkerConfig)
     model: ModelConfig = Field(default_factory=ModelConfig)
     retry: RetryConfig = Field(default_factory=RetryConfig)
