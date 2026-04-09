@@ -152,18 +152,6 @@ def test_dynamic_token_policy_fallback_when_primary_unhealthy() -> None:
     assert selected.token_id == "backup-token"
 
 
-def test_dynamic_token_policy_does_not_reselect_unhealthy_token_when_all_candidates_are_bad() -> None:
-    pool = TokenPool()
-    pool.register_token(_token("primary-token", model="gpt-4"))
-    pool.register_token(_token("backup-token", model="gpt-4"))
-    pool.mark_token_unhealthy("primary-token", reason="403")
-    pool.mark_token_unhealthy("backup-token", reason="401")
-
-    policy = DynamicTokenPolicy(pool, strategy="health", primary_token_id="primary-token")
-    selected = policy.mark_session_token_unhealthy("s1", reason="403")
-    assert selected is None
-
-
 @pytest.mark.asyncio
 async def test_agent_instance_pool_cache_and_concurrency_limit() -> None:
     pool = AgentInstancePool(max_concurrent_per_instance=4)

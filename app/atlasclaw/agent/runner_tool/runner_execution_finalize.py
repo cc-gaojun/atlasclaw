@@ -1,0 +1,140 @@
+from __future__ import annotations
+
+from typing import Any, AsyncIterator
+
+from app.atlasclaw.agent.stream import StreamEvent
+
+
+class RunnerExecutionFinalizePhaseMixin:
+    async def _run_finalize_phase(self, *, state: dict[str, Any]) -> AsyncIterator[StreamEvent]:
+        """Finalize run lifecycle and agent-end hooks."""
+        session_key = state.get("session_key")
+        user_message = state.get("user_message")
+        deps = state.get("deps")
+        max_tool_calls = state.get("max_tool_calls")
+        timeout_seconds = state.get("timeout_seconds")
+        _token_failover_attempt = state.get("_token_failover_attempt")
+        _emit_lifecycle_bounds = state.get("_emit_lifecycle_bounds")
+        start_time = state.get("start_time")
+        tool_calls_count = state.get("tool_calls_count")
+        compaction_applied = state.get("compaction_applied")
+        thinking_emitter = state.get("thinking_emitter")
+        persist_override_messages = state.get("persist_override_messages")
+        persist_override_base_len = state.get("persist_override_base_len")
+        runtime_agent = state.get("runtime_agent")
+        selected_token_id = state.get("selected_token_id")
+        release_slot = state.get("release_slot")
+        flushed_memory_signatures = state.get("flushed_memory_signatures")
+        extra = state.get("extra")
+        run_id = state.get("run_id")
+        tool_policy_retry_count = state.get("tool_policy_retry_count")
+        run_failed = state.get("run_failed")
+        message_history = state.get("message_history")
+        system_prompt = state.get("system_prompt")
+        final_assistant = state.get("final_assistant")
+        context_history_for_hooks = state.get("context_history_for_hooks")
+        tool_call_summaries = state.get("tool_call_summaries")
+        session_title = state.get("session_title")
+        buffered_assistant_events = state.get("buffered_assistant_events")
+        assistant_output_streamed = state.get("assistant_output_streamed")
+        tool_request_message = state.get("tool_request_message")
+        tool_gate_decision = state.get("tool_gate_decision")
+        tool_match_result = state.get("tool_match_result")
+        current_model_attempt = state.get("current_model_attempt")
+        current_attempt_started_at = state.get("current_attempt_started_at")
+        current_attempt_has_text = state.get("current_attempt_has_text")
+        current_attempt_has_tool = state.get("current_attempt_has_tool")
+        reasoning_retry_count = state.get("reasoning_retry_count")
+        run_output_start_index = state.get("run_output_start_index")
+        web_tool_verification_enforced = state.get("web_tool_verification_enforced")
+        reasoning_retry_limit = state.get("reasoning_retry_limit")
+        model_stream_timed_out = state.get("model_stream_timed_out")
+        model_timeout_error_message = state.get("model_timeout_error_message")
+        fast_path_tool_answer = state.get("fast_path_tool_answer")
+        runtime_context_window_info = state.get("runtime_context_window_info")
+        runtime_context_guard = state.get("runtime_context_guard")
+        runtime_context_window = state.get("runtime_context_window")
+        session_manager = state.get("session_manager")
+        session = state.get("session")
+        transcript = state.get("transcript")
+        all_available_tools = state.get("all_available_tools")
+        tool_groups_snapshot = state.get("tool_groups_snapshot")
+        available_tools = state.get("available_tools")
+        toolset_filter_trace = state.get("toolset_filter_trace")
+        used_toolset_fallback = state.get("used_toolset_fallback")
+        provider_hint_docs = state.get("provider_hint_docs")
+        skill_hint_docs = state.get("skill_hint_docs")
+        metadata_candidates = state.get("metadata_candidates")
+        ranking_trace = state.get("ranking_trace")
+        # -- hook:agent_end --
+        if not run_failed:
+            await self.runtime_events.trigger_agent_end(
+                session_key=session_key,
+                run_id=run_id,
+                tool_calls_count=tool_calls_count,
+                compaction_applied=compaction_applied,
+            )
+
+        if _emit_lifecycle_bounds:
+            yield StreamEvent.lifecycle_end()
+        state.update({
+            "session_key": session_key,
+            "user_message": user_message,
+            "deps": deps,
+            "max_tool_calls": max_tool_calls,
+            "timeout_seconds": timeout_seconds,
+            "_token_failover_attempt": _token_failover_attempt,
+            "_emit_lifecycle_bounds": _emit_lifecycle_bounds,
+            "start_time": start_time,
+            "tool_calls_count": tool_calls_count,
+            "compaction_applied": compaction_applied,
+            "thinking_emitter": thinking_emitter,
+            "persist_override_messages": persist_override_messages,
+            "persist_override_base_len": persist_override_base_len,
+            "runtime_agent": runtime_agent,
+            "selected_token_id": selected_token_id,
+            "release_slot": release_slot,
+            "flushed_memory_signatures": flushed_memory_signatures,
+            "extra": extra,
+            "run_id": run_id,
+            "tool_policy_retry_count": tool_policy_retry_count,
+            "run_failed": run_failed,
+            "message_history": message_history,
+            "system_prompt": system_prompt,
+            "final_assistant": final_assistant,
+            "context_history_for_hooks": context_history_for_hooks,
+            "tool_call_summaries": tool_call_summaries,
+            "session_title": session_title,
+            "buffered_assistant_events": buffered_assistant_events,
+            "assistant_output_streamed": assistant_output_streamed,
+            "tool_request_message": tool_request_message,
+            "tool_gate_decision": tool_gate_decision,
+            "tool_match_result": tool_match_result,
+            "current_model_attempt": current_model_attempt,
+            "current_attempt_started_at": current_attempt_started_at,
+            "current_attempt_has_text": current_attempt_has_text,
+            "current_attempt_has_tool": current_attempt_has_tool,
+            "reasoning_retry_count": reasoning_retry_count,
+            "run_output_start_index": run_output_start_index,
+            "web_tool_verification_enforced": web_tool_verification_enforced,
+            "reasoning_retry_limit": reasoning_retry_limit,
+            "model_stream_timed_out": model_stream_timed_out,
+            "model_timeout_error_message": model_timeout_error_message,
+            "fast_path_tool_answer": fast_path_tool_answer,
+            "runtime_context_window_info": runtime_context_window_info,
+            "runtime_context_guard": runtime_context_guard,
+            "runtime_context_window": runtime_context_window,
+            "session_manager": session_manager,
+            "session": session,
+            "transcript": transcript,
+            "all_available_tools": all_available_tools,
+            "tool_groups_snapshot": tool_groups_snapshot,
+            "available_tools": available_tools,
+            "toolset_filter_trace": toolset_filter_trace,
+            "used_toolset_fallback": used_toolset_fallback,
+            "provider_hint_docs": provider_hint_docs,
+            "skill_hint_docs": skill_hint_docs,
+            "metadata_candidates": metadata_candidates,
+            "ranking_trace": ranking_trace,
+        })
+
