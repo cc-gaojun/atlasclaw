@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime
 import logging
 import time
 from typing import Any, AsyncIterator, Optional
@@ -10,6 +11,7 @@ from app.atlasclaw.agent.context_pruning import prune_context_messages, should_a
 from app.atlasclaw.agent.context_window_guard import evaluate_context_window_guard
 from app.atlasclaw.agent.runner_prompt_context import build_system_prompt, collect_tool_groups_snapshot, collect_tools_snapshot
 from app.atlasclaw.agent.runner_tool.runner_tool_projection import (
+    DEFAULT_COORDINATION_TOOL_NAMES,
     project_minimal_toolset,
     project_planner_toolset,
     turn_action_requires_tool_execution,
@@ -45,6 +47,99 @@ def select_execution_prompt_mode(
     if 0 < safe_projected_count <= 12:
         return PromptMode.MINIMAL
     return PromptMode.FULL
+
+
+def select_explicit_tool_execution_target(
+    *,
+    intent_plan: ToolIntentPlan | None,
+    is_follow_up: bool,
+    projected_tools: list[dict[str, Any]],
+) -> Optional[dict[str, Any]]:
+    """Return the single direct-execution tool for low-noise explicit tool turns."""
+    if intent_plan is None or intent_plan.action is not ToolIntentAction.USE_TOOLS:
+        return None
+    if is_follow_up:
+        return None
+
+    candidate_tools: list[dict[str, Any]] = []
+    for tool in projected_tools or []:
+        if not isinstance(tool, dict):
+            continue
+        tool_name = str(tool.get("name", "") or "").strip()
+        if not tool_name or tool_name in DEFAULT_COORDINATION_TOOL_NAMES:
+            continue
+        candidate_tools.append(tool)
+
+    if len(candidate_tools) != 1:
+        return None
+
+    target_tool = candidate_tools[0]
+    if str(target_tool.get("result_mode", "") or "").strip().lower() != "tool_only_ok":
+        return None
+    return dict(target_tool)
+
+
+def build_explicit_tool_execution_prompt(
+    *,
+    tool: dict[str, Any],
+    now_local: Optional[datetime] = None,
+) -> str:
+    """Build a tiny system prompt for single-tool explicit execution turns."""
+    tool_name = str(tool.get("name", "") or "").strip() or "tool"
+    description = str(tool.get("description", "") or "").strip() or "No description provided."
+    capability_class = str(tool.get("capability_class", "") or "").strip()
+    provider_type = str(tool.get("provider_type", "") or "").strip()
+    result_mode = str(tool.get("result_mode", "") or "").strip() or "llm"
+    parameters_schema = tool.get("parameters_schema", {})
+    required_fields: list[str] = []
+    properties: dict[str, Any] = {}
+    if isinstance(parameters_schema, dict):
+        raw_properties = parameters_schema.get("properties")
+        if isinstance(raw_properties, dict):
+            properties = raw_properties
+        required_fields = [
+            str(item).strip()
+            for item in (parameters_schema.get("required", []) or [])
+            if str(item).strip()
+        ]
+
+    local_now = (now_local or datetime.now().astimezone()).isoformat(timespec="seconds")
+    argument_lines: list[str] = []
+    for field_name, field_spec in properties.items():
+        if not isinstance(field_spec, dict):
+            continue
+        type_name = str(field_spec.get("type", "") or "string").strip()
+        field_desc = str(field_spec.get("description", "") or "").strip()
+        required_label = "required" if field_name in required_fields else "optional"
+        line = f"- {field_name} ({type_name}, {required_label})"
+        if field_desc:
+            line += f": {field_desc}"
+        argument_lines.append(line)
+    if not argument_lines:
+        argument_lines.append("- no explicit arguments")
+
+    capability_line = capability_class or "unknown"
+    if provider_type:
+        capability_line = f"{capability_line}; provider={provider_type}"
+
+    return (
+        "You are AtlasClaw.\n"
+        "This turn has already been narrowed to exactly one allowed runtime tool.\n"
+        "Your only valid actions are:\n"
+        "1) Call the allowed tool exactly once with concrete arguments.\n"
+        "2) Ask one concise clarification question if required inputs are missing.\n"
+        "Do not answer from memory.\n"
+        "Do not mention hidden reasoning.\n"
+        "Do not mention any other tool.\n\n"
+        f"Current local time:\n{local_now}\n\n"
+        "Allowed tool:\n"
+        f"- name: {tool_name}\n"
+        f"- description: {description}\n"
+        f"- capability: {capability_line}\n"
+        f"- result_mode: {result_mode}\n"
+        "Arguments:\n"
+        f"{chr(10).join(argument_lines)}\n"
+    )
 
 
 class RunnerExecutionPreparePhaseMixin:
@@ -506,11 +601,21 @@ class RunnerExecutionPreparePhaseMixin:
                 is_follow_up=used_follow_up_context,
                 projected_tool_count=len(available_tools),
             )
+            explicit_tool_execution_target = select_explicit_tool_execution_target(
+                intent_plan=tool_intent_plan,
+                is_follow_up=used_follow_up_context,
+                projected_tools=available_tools,
+            )
             _log_step(
                 "execution_prompt_mode_selected",
-                mode=prompt_mode.value,
+                mode="explicit_tool_execution" if explicit_tool_execution_target else prompt_mode.value,
                 projected_tool_count=len(available_tools),
                 used_follow_up_context=used_follow_up_context,
+                explicit_tool_name=(
+                    str(explicit_tool_execution_target.get("name", "") or "").strip()
+                    if isinstance(explicit_tool_execution_target, dict)
+                    else ""
+                ),
             )
             await self.runtime_events.trigger_tool_gate_evaluated(
                 session_key=session_key,
@@ -539,28 +644,33 @@ class RunnerExecutionPreparePhaseMixin:
                 state["should_stop"] = True
                 return
 
-            system_prompt = build_system_prompt(
-                self.prompt_builder,
-                session=session,
-                deps=deps,
-                agent=runtime_agent or self.agent,
-                context_window_tokens=runtime_context_window,
-                prompt_mode=prompt_mode,
-            )
-            consume_prompt_warnings = getattr(self.prompt_builder, "consume_warnings", None)
-            if callable(consume_prompt_warnings):
-                for warning_message in consume_prompt_warnings():
-                    if not self._should_surface_prompt_warning(warning_message):
-                        logger.debug("Suppressing prompt-context warning: %s", warning_message)
-                        continue
-                    yield StreamEvent.runtime_update(
-                        "warning",
-                        warning_message,
-                        metadata={
-                            "phase": "prompt_context",
-                            "elapsed": round(time.monotonic() - start_time, 1),
-                        },
-                    )
+            if explicit_tool_execution_target is not None:
+                system_prompt = build_explicit_tool_execution_prompt(
+                    tool=explicit_tool_execution_target,
+                )
+            else:
+                system_prompt = build_system_prompt(
+                    self.prompt_builder,
+                    session=session,
+                    deps=deps,
+                    agent=runtime_agent or self.agent,
+                    context_window_tokens=runtime_context_window,
+                    prompt_mode=prompt_mode,
+                )
+                consume_prompt_warnings = getattr(self.prompt_builder, "consume_warnings", None)
+                if callable(consume_prompt_warnings):
+                    for warning_message in consume_prompt_warnings():
+                        if not self._should_surface_prompt_warning(warning_message):
+                            logger.debug("Suppressing prompt-context warning: %s", warning_message)
+                            continue
+                        yield StreamEvent.runtime_update(
+                            "warning",
+                            warning_message,
+                            metadata={
+                                "phase": "prompt_context",
+                                "elapsed": round(time.monotonic() - start_time, 1),
+                            },
+                        )
 
             if self.hooks:
                 prompt_ctx = await self.hooks.trigger(

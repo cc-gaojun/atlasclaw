@@ -1,13 +1,19 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
+from datetime import datetime
 from types import SimpleNamespace
 
 from pydantic_ai import Agent
 
 from app.atlasclaw.agent.prompt_builder import PromptMode
 from app.atlasclaw.agent.runner_prompt_context import collect_tools_snapshot
-from app.atlasclaw.agent.runner_tool.runner_execution_prepare import select_execution_prompt_mode
+from app.atlasclaw.agent.runner_tool.runner_execution_prepare import (
+    build_explicit_tool_execution_prompt,
+    select_execution_prompt_mode,
+    select_explicit_tool_execution_target,
+)
+from app.atlasclaw.agent.tool_gate_models import ToolIntentAction, ToolIntentPlan
 
 
 def test_collect_tools_snapshot_prefers_deps_extra_snapshot() -> None:
@@ -333,3 +339,80 @@ def test_select_execution_prompt_mode_keeps_full_for_follow_up_tool_turn() -> No
     )
 
     assert mode is PromptMode.FULL
+
+
+def test_select_explicit_tool_execution_target_returns_single_tool_only_candidate() -> None:
+    target = select_explicit_tool_execution_target(
+        intent_plan=ToolIntentPlan(action=ToolIntentAction.USE_TOOLS, target_tool_names=["openmeteo_weather"]),
+        is_follow_up=False,
+        projected_tools=[
+            {
+                "name": "openmeteo_weather",
+                "description": "Get weather forecast",
+                "result_mode": "tool_only_ok",
+                "capability_class": "weather",
+            },
+            {
+                "name": "select_provider_instance",
+                "description": "Select provider instance",
+                "capability_class": "session",
+            },
+        ],
+    )
+
+    assert target is not None
+    assert target["name"] == "openmeteo_weather"
+
+
+def test_select_explicit_tool_execution_target_skips_follow_up_and_non_terminal_tools() -> None:
+    follow_up_target = select_explicit_tool_execution_target(
+        intent_plan=ToolIntentPlan(action=ToolIntentAction.USE_TOOLS, target_tool_names=["openmeteo_weather"]),
+        is_follow_up=True,
+        projected_tools=[
+            {
+                "name": "openmeteo_weather",
+                "description": "Get weather forecast",
+                "result_mode": "tool_only_ok",
+            }
+        ],
+    )
+    llm_target = select_explicit_tool_execution_target(
+        intent_plan=ToolIntentPlan(action=ToolIntentAction.USE_TOOLS, target_tool_names=["smartcmp_submit"]),
+        is_follow_up=False,
+        projected_tools=[
+            {
+                "name": "smartcmp_submit",
+                "description": "Submit SmartCMP request",
+                "result_mode": "llm",
+            }
+        ],
+    )
+
+    assert follow_up_target is None
+    assert llm_target is None
+
+
+def test_build_explicit_tool_execution_prompt_is_compact_and_includes_tool_schema() -> None:
+    prompt = build_explicit_tool_execution_prompt(
+        tool={
+            "name": "openmeteo_weather",
+            "description": "Get weather forecast for a city.",
+            "capability_class": "weather",
+            "result_mode": "tool_only_ok",
+            "parameters_schema": {
+                "type": "object",
+                "properties": {
+                    "location": {"type": "string", "description": "City or place name"},
+                    "target_date": {"type": "string", "description": "Target date in YYYY-MM-DD"},
+                },
+                "required": ["location"],
+            },
+        },
+        now_local=datetime(2026, 4, 11, 9, 30, 0),
+    )
+
+    assert "Allowed tool:" in prompt
+    assert "- name: openmeteo_weather" in prompt
+    assert "- location (string, required): City or place name" in prompt
+    assert "- target_date (string, optional): Target date in YYYY-MM-DD" in prompt
+    assert "Do not answer from memory." in prompt
