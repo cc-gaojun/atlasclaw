@@ -11,7 +11,7 @@ from app.atlasclaw.auth.models import UserInfo
 from app.atlasclaw.session.manager import SessionManager
 from app.atlasclaw.session.queue import SessionQueue
 from app.atlasclaw.skills.registry import SkillRegistry
-from app.atlasclaw.tools.catalog import GROUP_ATLASCLAW, GROUP_WEB
+from app.atlasclaw.tools.catalog import GROUP_ATLASCLAW, GROUP_CATALOG, GROUP_WEB
 from app.atlasclaw.tools.registration import register_builtin_tools
 
 
@@ -113,3 +113,11 @@ def test_register_builtin_tools_exposes_explicit_runtime_metadata() -> None:
     assert tools["openmeteo_weather"]["source"] == "builtin"
     assert tools["openmeteo_weather"]["capability_class"] == "weather"
     assert set(tools["openmeteo_weather"]["group_ids"]) == {GROUP_WEB, GROUP_ATLASCLAW}
+
+    assert tools["atlasclaw_catalog_query"]["source"] == "builtin"
+    assert tools["atlasclaw_catalog_query"]["capability_class"] == "atlasclaw_catalog"
+    assert tools["atlasclaw_catalog_query"]["result_mode"] == "tool_only_ok"
+    assert set(tools["atlasclaw_catalog_query"]["group_ids"]) == {
+        GROUP_CATALOG,
+        GROUP_ATLASCLAW,
+    }

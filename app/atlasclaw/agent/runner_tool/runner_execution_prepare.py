@@ -481,18 +481,18 @@ class RunnerExecutionPreparePhaseMixin:
                     "tool_intent_plan_cache_miss",
                     cache_key=tool_gate_cache_key[:12],
                 )
-                tool_intent_plan = self._build_metadata_fallback_tool_intent_plan(
-                    metadata_candidates=metadata_candidates,
-                    available_tools=available_tools,
+                tool_intent_plan = self._build_projected_toolset_short_circuit_intent_plan(
+                    planner_available_tools=planner_available_tools,
                 )
                 if tool_intent_plan is not None:
-                    _log_step("tool_intent_plan_metadata_short_circuit")
+                    _log_step("tool_intent_plan_projected_toolset_short_circuit")
                 if tool_intent_plan is None:
-                    tool_intent_plan = self._build_projected_toolset_short_circuit_intent_plan(
-                        planner_available_tools=planner_available_tools,
+                    tool_intent_plan = self._build_metadata_fallback_tool_intent_plan(
+                        metadata_candidates=metadata_candidates,
+                        available_tools=available_tools,
                     )
                     if tool_intent_plan is not None:
-                        _log_step("tool_intent_plan_projected_toolset_short_circuit")
+                        _log_step("tool_intent_plan_metadata_short_circuit")
                 if tool_intent_plan is None and self.tool_gate_model_classifier_enabled:
                     tool_intent_plan = await self._plan_tool_intent_with_model(
                         agent=runtime_agent,

@@ -150,7 +150,23 @@ class RunnerToolGatePolicyMixin:
         *,
         decision: ToolGateDecision,
         match_result: CapabilityMatchResult,
+        intent_plan: Optional[ToolIntentPlan] = None,
     ) -> list[str]:
+        explicit_target_tools = [
+            str(name or "").strip()
+            for name in list(getattr(intent_plan, "target_tool_names", []) or [])
+            if str(name or "").strip()
+        ]
+        if explicit_target_tools:
+            deduped_targets: list[str] = []
+            seen_targets: set[str] = set()
+            for name in explicit_target_tools:
+                if name in seen_targets:
+                    continue
+                seen_targets.add(name)
+                deduped_targets.append(name)
+            return deduped_targets
+
         required: list[str] = []
         if decision.needs_external_system:
             required_by_capability: dict[str, str] = {}
@@ -191,6 +207,7 @@ class RunnerToolGatePolicyMixin:
         *,
         decision: ToolGateDecision,
         match_result: CapabilityMatchResult,
+        intent_plan: Optional[ToolIntentPlan] = None,
         tool_call_summaries: list[dict[str, Any]],
         available_tools: Optional[list[dict[str, Any]]] = None,
         final_messages: Optional[list[dict[str, Any]]] = None,
@@ -199,6 +216,7 @@ class RunnerToolGatePolicyMixin:
         required = self._required_tool_names_for_decision(
             decision=decision,
             match_result=match_result,
+            intent_plan=intent_plan,
         )
         if not required:
             return []

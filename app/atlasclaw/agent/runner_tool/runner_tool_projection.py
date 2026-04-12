@@ -84,6 +84,18 @@ def project_minimal_toolset(
         if str(item).strip()
     }
 
+    explicit_target_mode = bool(target_tool_names)
+    if explicit_target_mode:
+        _apply_step(
+            "tool_name",
+            lambda tool: str(tool.get("name", "") or "").strip() in target_tool_names,
+            True,
+        )
+        target_provider_types = set()
+        target_skill_names = set()
+        target_group_ids = set()
+        target_capability_classes = set()
+
     _apply_step(
         "provider_type",
         lambda tool: str(tool.get("provider_type", "") or "").strip().lower() in target_provider_types,
@@ -108,11 +120,12 @@ def project_minimal_toolset(
         in target_capability_classes,
         bool(target_capability_classes),
     )
-    _apply_step(
-        "tool_name",
-        lambda tool: str(tool.get("name", "") or "").strip() in target_tool_names,
-        bool(target_tool_names),
-    )
+    if not explicit_target_mode:
+        _apply_step(
+            "tool_name",
+            lambda tool: str(tool.get("name", "") or "").strip() in target_tool_names,
+            bool(target_tool_names),
+        )
     _apply_step(
         "skill_name",
         lambda tool: (
@@ -141,6 +154,7 @@ def project_minimal_toolset(
             "reason": "projection_applied" if current else "projection_empty",
             "after_count": len(current),
             "steps": steps,
+            "explicit_target_mode": explicit_target_mode,
             "coordination_tools": [
                 str(tool.get("name", "") or "").strip() for tool in coordination_tools
             ],

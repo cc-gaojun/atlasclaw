@@ -177,6 +177,7 @@ class RunnerExecutionFlowPostMixin:
         missing_required_tools = self._missing_required_tool_names(
             decision=state.get("tool_gate_decision"),
             match_result=state.get("tool_match_result"),
+            intent_plan=tool_intent_plan,
             tool_call_summaries=tool_call_summaries,
             available_tools=state.get("available_tools"),
             final_messages=final_messages,

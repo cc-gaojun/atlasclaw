@@ -183,6 +183,7 @@ class RunnerToolEvidenceMixin:
         compact_chunks: list[str] = []
         for chunk in chunks:
             compact = self._compact_tool_fallback_text(chunk, max_chars=1200).strip()
+            compact = self._normalize_ascii_tool_output_to_markdown(compact)
             if compact:
                 compact_chunks.append(compact)
         if not compact_chunks:
@@ -328,7 +329,90 @@ class RunnerToolEvidenceMixin:
         text = str(record.get("text", "") or "").strip()
         if not text:
             return ""
-        return text
+        return self._normalize_ascii_tool_output_to_markdown(text)
+
+    @staticmethod
+    def _looks_like_ascii_tool_layout(text: str) -> bool:
+        normalized = str(text or "").strip()
+        if not normalized:
+            return False
+        separator_count = len(re.findall(r"(?m)^[=+\-|]{8,}\s*$", normalized))
+        pipe_line_count = len(re.findall(r"(?m)^\|\s*.+$", normalized))
+        boxed_header_count = len(re.findall(r"(?m)^\+-\s*\[[^\]]+\].*$", normalized))
+        return separator_count >= 2 or pipe_line_count >= 2 or boxed_header_count >= 1
+
+    @staticmethod
+    def _strip_tool_answer_wrapper(text: str) -> str:
+        normalized = str(text or "").replace("\r\n", "\n").lstrip()
+        if not normalized:
+            return ""
+        lines = normalized.split("\n")
+        first_line = (lines[0] or "").strip()
+        second_line = (lines[1] or "").strip() if len(lines) > 1 else ""
+        wrapper_pattern = re.compile(r"^(answer|result|response|回答|结果|回复)\s*[:：-]?$", re.IGNORECASE)
+        if wrapper_pattern.fullmatch(first_line) and re.fullmatch(r"=+", second_line):
+            return "\n".join(lines[2:]).lstrip()
+        if wrapper_pattern.fullmatch(first_line):
+            return "\n".join(lines[1:]).lstrip()
+        return normalized
+
+    def _normalize_ascii_tool_output_to_markdown(self, text: str) -> str:
+        normalized = self._strip_tool_answer_wrapper(text)
+        if not self._looks_like_ascii_tool_layout(normalized):
+            return normalized.strip()
+
+        markdown_lines: list[str] = []
+        previous_blank = False
+        promoted_heading = False
+        for raw_line in normalized.splitlines():
+            line = str(raw_line or "").rstrip()
+            stripped = line.strip()
+            if not stripped:
+                if markdown_lines and not previous_blank:
+                    markdown_lines.append("")
+                previous_blank = True
+                continue
+            if re.fullmatch(r"[=+\-|]{8,}", stripped):
+                continue
+            if (
+                not promoted_heading
+                and stripped
+                and not stripped.startswith(("###", "##", "#", "-", "*"))
+                and not re.fullmatch(r"\+-\s*\[[^\]]+\].*", stripped)
+                and not re.fullmatch(r"\|\s*.+", stripped)
+            ):
+                markdown_lines.append(f"## {stripped}")
+                promoted_heading = True
+                previous_blank = False
+                continue
+            boxed_header_match = re.fullmatch(r"\+-\s*(\[[^\]]+\]\s*.+?)(?:\s*[-=+|]+)?", stripped)
+            if boxed_header_match:
+                header_text = " ".join(boxed_header_match.group(1).split()).strip()
+                if markdown_lines and markdown_lines[-1] != "":
+                    markdown_lines.append("")
+                markdown_lines.append(f"### {header_text}")
+                previous_blank = False
+                continue
+            pipe_field_match = re.fullmatch(r"\|\s*(.+?)\s*:\s*(.+)", stripped)
+            if pipe_field_match:
+                field_name = " ".join(pipe_field_match.group(1).split()).strip()
+                field_value = " ".join(pipe_field_match.group(2).split()).strip()
+                markdown_lines.append(f"- {field_name}: {field_value}")
+                previous_blank = False
+                continue
+            if stripped == "|":
+                if markdown_lines and not previous_blank:
+                    markdown_lines.append("")
+                previous_blank = True
+                continue
+            markdown_lines.append(" ".join(stripped.split()))
+            previous_blank = False
+
+        while markdown_lines and markdown_lines[0] == "":
+            markdown_lines.pop(0)
+        while markdown_lines and markdown_lines[-1] == "":
+            markdown_lines.pop()
+        return "\n".join(markdown_lines).strip()
 
     @staticmethod
     def _extract_embedded_meta_payloads(text: str) -> list[dict[str, Any]]:

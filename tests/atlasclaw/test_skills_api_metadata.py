@@ -5,6 +5,9 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from app.atlasclaw.api.routes import APIContext, create_router, set_api_context
+from app.atlasclaw.auth.guards import AuthorizationContext, get_authorization_context
+from app.atlasclaw.auth.models import UserInfo
+from app.atlasclaw.db.orm.role import build_default_permissions
 from app.atlasclaw.session.manager import SessionManager
 from app.atlasclaw.session.queue import SessionQueue
 from app.atlasclaw.skills.registry import SkillRegistry
@@ -23,6 +26,21 @@ def _build_client(tmp_path) -> TestClient:
 
     app = FastAPI()
     app.include_router(create_router())
+
+    permissions = build_default_permissions()
+    permissions["skills"]["module_permissions"]["view"] = True
+    app.dependency_overrides[get_authorization_context] = lambda: AuthorizationContext(
+        user=UserInfo(
+            user_id="skill-metadata-viewer",
+            display_name="Skill Metadata Viewer",
+            roles=["viewer"],
+            extra={},
+            auth_type="test",
+        ),
+        role_identifiers=["viewer"],
+        permissions=permissions,
+        is_admin=False,
+    )
     return TestClient(app)
 
 

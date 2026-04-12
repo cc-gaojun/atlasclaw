@@ -1504,6 +1504,51 @@ def test_build_tool_only_markdown_answer_prefers_meta_block_over_ascii_layout() 
     assert "+- [1]" not in answer
 
 
+def test_build_tool_only_markdown_answer_normalizes_plain_ascii_layout_to_markdown() -> None:
+    runner = _PostRunner()
+
+    ascii_output = "\n".join(
+        [
+            "Answer",
+            "=====",
+            "===============================================================",
+            "待审批列表 - 共 2 项（按优先级排序）",
+            "===============================================================",
+            "+- [1] 高 ---------------------------------------------",
+            "| 名称: Test ticket for build verification",
+            "| 工单号: TIC20260316000001",
+            "| 类型: Incident Ticket",
+            "|",
+            "+- [2] 高 ---------------------------------------------",
+            "| 名称: 加急加急",
+            "| 工单号: TIC20260313000006",
+            "| 类型: 问题工单",
+            "+------------------------------------------------------",
+        ]
+    )
+
+    answer = runner._build_tool_only_markdown_answer_from_messages(
+        messages=[
+            {
+                "role": "tool",
+                "tool_name": "smartcmp_list_pending",
+                "content": {"output": ascii_output},
+            }
+        ],
+        start_index=0,
+    )
+
+    assert "Answer" not in answer
+    assert "=====" not in answer
+    assert "+- [1]" not in answer
+    assert "| 名称:" not in answer
+    assert "## 待审批列表 - 共 2 项（按优先级排序）" in answer
+    assert "### [1] 高" in answer
+    assert "- 名称: Test ticket for build verification" in answer
+    assert "- 工单号: TIC20260316000001" in answer
+    assert "### [2] 高" in answer
+
+
 @pytest.mark.asyncio
 async def test_post_success_side_effects_do_not_block_answer_completion() -> None:
     runner = _SlowPostRunner()

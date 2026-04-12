@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from app.atlasclaw.agent.runner_tool.runner_tool_gate_model import RunnerToolGateModelMixin
 from app.atlasclaw.agent.runner_tool.runner_tool_gate_routing import RunnerToolGateRoutingMixin
+from app.atlasclaw.agent.runner_tool.runner_tool_projection import project_minimal_toolset
 from app.atlasclaw.agent.tool_gate import CapabilityMatcher
 from app.atlasclaw.agent.tool_gate_models import (
     ToolGateDecision,
@@ -153,6 +154,47 @@ def test_projected_toolset_short_circuit_skips_non_tool_only_result_mode() -> No
     assert plan is None
 
 
+def test_project_minimal_toolset_keeps_explicit_target_tool_even_with_provider_target() -> None:
+    intent_plan = ToolIntentPlan(
+        action=ToolIntentAction.USE_TOOLS,
+        target_provider_types=["smartcmp"],
+        target_tool_names=["atlasclaw_catalog_query"],
+        target_capability_classes=["atlasclaw_catalog"],
+        reason="platform catalog query scoped to SmartCMP",
+    )
+
+    projected, trace = project_minimal_toolset(
+        allowed_tools=[
+            {
+                "name": "atlasclaw_catalog_query",
+                "description": "Query AtlasClaw runtime catalog",
+                "capability_class": "atlasclaw_catalog",
+                "group_ids": ["group:catalog", "group:atlasclaw"],
+                "result_mode": "tool_only_ok",
+            },
+            {
+                "name": "smartcmp_list_pending",
+                "description": "List SmartCMP pending approvals",
+                "provider_type": "smartcmp",
+                "capability_class": "provider:smartcmp",
+                "group_ids": ["group:cmp", "group:smartcmp"],
+            },
+            {
+                "name": "select_provider_instance",
+                "description": "Select provider instance",
+                "capability_class": "provider:generic",
+                "group_ids": ["group:providers", "group:atlasclaw"],
+            },
+        ],
+        intent_plan=intent_plan,
+    )
+
+    projected_names = {item["name"] for item in projected}
+    assert "atlasclaw_catalog_query" in projected_names
+    assert "smartcmp_list_pending" not in projected_names
+    assert trace["reason"] == "projection_applied"
+
+
 def test_align_tool_intent_plan_with_metadata_does_not_merge_unrelated_provider_hints() -> None:
     runner = _GateRunner()
     available_tools = [
@@ -191,6 +233,195 @@ def test_align_tool_intent_plan_with_metadata_does_not_merge_unrelated_provider_
     assert aligned.target_provider_types == []
     assert aligned.target_capability_classes == ["weather"]
     assert aligned.target_tool_names == ["openmeteo_weather"]
+
+
+def test_metadata_recall_prefers_higher_scored_catalog_tool_over_provider_bundle() -> None:
+    runner = _GateRunner()
+    available_tools = [
+        {
+            "name": "atlasclaw_catalog_query",
+            "description": "Query AtlasClaw runtime catalogs for available providers, skills, tools, and groups",
+            "capability_class": "atlasclaw_catalog",
+            "group_ids": ["group:catalog", "group:atlasclaw"],
+            "aliases": ["catalog", "skills catalog", "tool catalog", "provider catalog", "runtime catalog"],
+            "keywords": ["available skills", "available tools", "providers", "catalog", "capabilities"],
+            "use_when": ["User asks which skills or tools are available for a specific provider"],
+            "priority": 40,
+        },
+        {
+            "name": "smartcmp_list_pending",
+            "description": "List SmartCMP pending approvals",
+            "provider_type": "smartcmp",
+            "capability_class": "provider:smartcmp",
+            "group_ids": ["group:cmp", "group:smartcmp"],
+            "priority": 100,
+        },
+        {
+            "name": "smartcmp_list_services",
+            "description": "List SmartCMP service catalogs",
+            "provider_type": "smartcmp",
+            "capability_class": "provider:smartcmp",
+            "group_ids": ["group:cmp", "group:smartcmp"],
+            "priority": 100,
+        },
+    ]
+    provider_hint_docs = [
+        {
+            "hint_id": "provider:smartcmp",
+            "provider_type": "smartcmp",
+            "display_name": "SmartCMP",
+            "aliases": ["cmp"],
+            "keywords": ["approval", "service catalog", "cmp"],
+            "capabilities": ["provider:smartcmp"],
+            "use_when": ["Query SmartCMP requests or service catalogs"],
+            "avoid_when": [],
+            "tool_names": ["smartcmp_list_pending", "smartcmp_list_services"],
+            "group_ids": ["group:cmp", "group:smartcmp"],
+            "capability_classes": ["provider:smartcmp"],
+            "priority": 80,
+            "hint_text": "SmartCMP enterprise service management cmp approval service catalog",
+        }
+    ]
+    tool_hint_docs = runner._build_tool_hint_docs(available_tools=available_tools)
+
+    metadata = runner._recall_provider_skill_candidates_from_metadata(
+        user_message="CMP现在有哪些skills可以使用",
+        recent_history=[],
+        used_follow_up_context=False,
+        available_tools=available_tools,
+        provider_hint_docs=provider_hint_docs,
+        skill_hint_docs=[],
+        tool_hint_docs=tool_hint_docs,
+        top_k_provider=2,
+        top_k_skill=3,
+    )
+
+    assert metadata["tool_candidates"][0]["tool_name"] == "atlasclaw_catalog_query"
+    assert metadata["preferred_tool_names"][0] == "atlasclaw_catalog_query"
+
+
+def test_metadata_fallback_prefers_dominant_tool_candidate_over_broad_provider_bundle() -> None:
+    runner = _GateRunner()
+    available_tools = [
+        {
+            "name": "atlasclaw_catalog_query",
+            "description": "Query AtlasClaw runtime catalogs",
+            "capability_class": "atlasclaw_catalog",
+            "group_ids": ["group:catalog", "group:atlasclaw"],
+            "result_mode": "tool_only_ok",
+            "priority": 40,
+        },
+        {
+            "name": "smartcmp_list_pending",
+            "description": "List SmartCMP pending approvals",
+            "provider_type": "smartcmp",
+            "capability_class": "provider:smartcmp",
+            "group_ids": ["group:cmp", "group:smartcmp"],
+            "priority": 100,
+        },
+        {
+            "name": "smartcmp_list_services",
+            "description": "List SmartCMP service catalogs",
+            "provider_type": "smartcmp",
+            "capability_class": "provider:smartcmp",
+            "group_ids": ["group:cmp", "group:smartcmp"],
+            "priority": 100,
+        },
+    ]
+
+    plan = runner._build_metadata_fallback_tool_intent_plan(
+        metadata_candidates={
+            "confidence": 0.86,
+            "preferred_provider_types": ["smartcmp"],
+            "preferred_group_ids": ["group:cmp", "group:catalog"],
+            "preferred_capability_classes": ["provider:smartcmp", "atlasclaw_catalog"],
+            "preferred_tool_names": [
+                "atlasclaw_catalog_query",
+                "smartcmp_list_pending",
+                "smartcmp_list_services",
+            ],
+            "tool_candidates": [
+                {
+                    "hint_id": "tool:atlasclaw_catalog_query",
+                    "tool_name": "atlasclaw_catalog_query",
+                    "score": 12,
+                    "has_strong_anchor": True,
+                    "tool_names": ["atlasclaw_catalog_query"],
+                    "group_ids": ["group:catalog", "group:atlasclaw"],
+                    "capability_classes": ["atlasclaw_catalog"],
+                },
+                {
+                    "hint_id": "tool:smartcmp_list_pending",
+                    "tool_name": "smartcmp_list_pending",
+                    "score": 4,
+                    "has_strong_anchor": False,
+                    "tool_names": ["smartcmp_list_pending"],
+                    "group_ids": ["group:cmp", "group:smartcmp"],
+                    "capability_classes": ["provider:smartcmp"],
+                },
+            ],
+            "reason": "metadata_recall_matched",
+        },
+        available_tools=available_tools,
+    )
+
+    assert plan is not None
+    assert plan.target_tool_names == ["atlasclaw_catalog_query"]
+    assert plan.target_capability_classes == ["atlasclaw_catalog"]
+    assert plan.target_provider_types == []
+
+
+def test_align_tool_intent_plan_with_metadata_prefers_explicit_single_tool_fallback() -> None:
+    runner = _GateRunner()
+    available_tools = [
+        {
+            "name": "atlasclaw_catalog_query",
+            "description": "Query AtlasClaw runtime catalogs",
+            "capability_class": "atlasclaw_catalog",
+            "group_ids": ["group:catalog", "group:atlasclaw"],
+            "result_mode": "tool_only_ok",
+        },
+        {
+            "name": "smartcmp_list_pending",
+            "description": "List SmartCMP pending approvals",
+            "provider_type": "smartcmp",
+            "capability_class": "provider:smartcmp",
+            "group_ids": ["group:cmp", "group:smartcmp"],
+        },
+    ]
+    plan = ToolIntentPlan(
+        action=ToolIntentAction.USE_TOOLS,
+        target_provider_types=["smartcmp"],
+        target_capability_classes=["provider:smartcmp"],
+        reason="planner selected provider family",
+    )
+
+    aligned = runner._align_tool_intent_plan_with_metadata(
+        plan=plan,
+        metadata_candidates={
+            "confidence": 0.88,
+            "preferred_provider_types": ["smartcmp"],
+            "preferred_group_ids": ["group:catalog"],
+            "preferred_capability_classes": ["atlasclaw_catalog"],
+            "preferred_tool_names": ["atlasclaw_catalog_query"],
+            "tool_candidates": [
+                {
+                    "hint_id": "tool:atlasclaw_catalog_query",
+                    "tool_name": "atlasclaw_catalog_query",
+                    "score": 10,
+                    "has_strong_anchor": True,
+                    "tool_names": ["atlasclaw_catalog_query"],
+                    "group_ids": ["group:catalog", "group:atlasclaw"],
+                    "capability_classes": ["atlasclaw_catalog"],
+                }
+            ],
+            "reason": "metadata_recall_matched",
+        },
+        available_tools=available_tools,
+    )
+
+    assert aligned.target_tool_names == ["atlasclaw_catalog_query"]
+    assert aligned.target_capability_classes == ["atlasclaw_catalog"]
 
 
 def test_classifier_history_ignores_recent_history_for_complete_new_request() -> None:

@@ -2,11 +2,11 @@
  * chat.js - Chat Page Module
  */
 
-import { initSession, getSessionKey, setSessionKey } from '../session-manager.js'
-import { initChat, activateSession, abortCurrentStream, getCurrentAgentInfo } from '../chat-ui.js'
-import { listSessions, deleteSession } from '../api-client.js'
-import { t } from '../i18n.js'
-import { updateHeaderTitleText } from '../components/header.js'
+import { initSession, getSessionKey, setSessionKey } from '../session-manager.js?v=18'
+import { initChat, activateSession, abortCurrentStream, getCurrentAgentInfo } from '../chat-ui.js?v=18'
+import { listSessions, deleteSession } from '../api-client.js?v=18'
+import { t } from '../i18n.js?v=18'
+import { updateHeaderTitleText } from '../components/header.js?v=18'
 
 let chatElement = null
 let mounted = false

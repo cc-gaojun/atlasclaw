@@ -201,6 +201,49 @@ class RunnerToolGateModelMixin:
             for tool in available_tools
             if isinstance(tool, dict) and str(tool.get("name", "") or "").strip()
         }
+        dominant_tool_name = self._select_dominant_metadata_tool_name(
+            metadata_candidates=metadata_candidates,
+            available_tools=available_tools,
+        )
+        if dominant_tool_name:
+            dominant_tool = next(
+                (
+                    tool
+                    for tool in available_tools
+                    if str(tool.get("name", "") or "").strip() == dominant_tool_name
+                ),
+                None,
+            )
+            if dominant_tool is not None:
+                provider_type = str(dominant_tool.get("provider_type", "") or "").strip().lower()
+                capability_class = str(dominant_tool.get("capability_class", "") or "").strip().lower()
+                qualified_skill_name = str(
+                    dominant_tool.get("qualified_skill_name", "") or dominant_tool.get("skill_name", "") or ""
+                ).strip()
+                target_group_ids = self._dedupe_preserve_order(
+                    [
+                        str(item).strip()
+                        for item in (dominant_tool.get("group_ids", []) or [])
+                        if str(item).strip()
+                    ]
+                )
+                reason = str(metadata_candidates.get("reason", "") or "").strip()
+                if reason:
+                    reason = (
+                        f"Metadata fallback planner selected a dominant explicit tool ({reason})."
+                    )
+                else:
+                    reason = "Metadata fallback planner selected a dominant explicit tool."
+
+                return ToolIntentPlan(
+                    action=ToolIntentAction.USE_TOOLS,
+                    target_provider_types=[provider_type] if provider_type else [],
+                    target_skill_names=[qualified_skill_name] if qualified_skill_name else [],
+                    target_group_ids=target_group_ids,
+                    target_capability_classes=[capability_class] if capability_class else [],
+                    target_tool_names=[dominant_tool_name],
+                    reason=reason,
+                )
 
         target_provider_types = self._dedupe_preserve_order(
             [
@@ -417,6 +460,46 @@ class RunnerToolGateModelMixin:
                 return False
         return True
 
+    @staticmethod
+    def _select_dominant_metadata_tool_name(
+        *,
+        metadata_candidates: dict[str, Any],
+        available_tools: list[dict[str, Any]],
+    ) -> str:
+        allowed_tool_names = {
+            str(tool.get("name", "") or "").strip()
+            for tool in available_tools
+            if isinstance(tool, dict) and str(tool.get("name", "") or "").strip()
+        }
+        ranked_candidates: list[tuple[int, str]] = []
+        for item in (metadata_candidates.get("tool_candidates", []) or []):
+            if not isinstance(item, dict) or not bool(item.get("has_strong_anchor")):
+                continue
+            tool_name = str(
+                item.get("tool_name", "")
+                or next(iter(item.get("tool_names", []) or []), "")
+                or ""
+            ).strip()
+            if not tool_name or tool_name not in allowed_tool_names:
+                continue
+            try:
+                score = int(item.get("score", 0) or 0)
+            except (TypeError, ValueError):
+                score = 0
+            ranked_candidates.append((score, tool_name))
+
+        if not ranked_candidates:
+            return ""
+
+        ranked_candidates.sort(key=lambda item: (-item[0], item[1].lower()))
+        top_score, top_name = ranked_candidates[0]
+        if len(ranked_candidates) == 1:
+            return top_name
+        second_score = ranked_candidates[1][0]
+        if top_score >= second_score + 3:
+            return top_name
+        return ""
+
     def _align_tool_intent_plan_with_metadata(
         self,
         *,
@@ -424,6 +507,8 @@ class RunnerToolGateModelMixin:
         metadata_candidates: Optional[dict[str, Any]],
         available_tools: list[dict[str, Any]],
     ) -> ToolIntentPlan:
+        if self._plan_has_explicit_single_tool_target(plan):
+            return plan
         fallback_plan = self._build_metadata_fallback_tool_intent_plan(
             metadata_candidates=metadata_candidates,
             available_tools=available_tools,
@@ -436,6 +521,9 @@ class RunnerToolGateModelMixin:
 
         if plan.action is not ToolIntentAction.USE_TOOLS:
             return plan
+
+        if self._plan_has_explicit_single_tool_target(fallback_plan):
+            return fallback_plan
 
         if not self._tool_intent_plans_are_compatible(
             plan=plan,
@@ -485,6 +573,17 @@ class RunnerToolGateModelMixin:
                 "reason": merged_reason,
             }
         )
+
+    @staticmethod
+    def _plan_has_explicit_single_tool_target(plan: ToolIntentPlan) -> bool:
+        if plan.action is not ToolIntentAction.USE_TOOLS:
+            return False
+        target_tool_names = [
+            str(item).strip()
+            for item in plan.target_tool_names
+            if str(item).strip()
+        ]
+        return len(list(dict.fromkeys(target_tool_names))) == 1
 
     def _tool_intent_plans_are_compatible(
         self,

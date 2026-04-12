@@ -405,7 +405,13 @@ async def resolve_authorization_context(
     if db_user and not db_user.is_active:
         raise HTTPException(status_code=403, detail="User account is inactive")
 
-    role_identifiers = _extract_role_identifiers(db_user.roles) if db_user is not None else []
+    normalized_auth_type = str(user.auth_type or "").strip().lower()
+    allow_transient_user_roles = normalized_auth_type in {"", "local", "test"}
+    role_identifiers = (
+        _extract_role_identifiers(db_user.roles)
+        if db_user is not None
+        else (_extract_role_identifiers(user.roles) if allow_transient_user_roles else [])
+    )
 
     effective_permissions = build_default_permissions()
     if role_identifiers:

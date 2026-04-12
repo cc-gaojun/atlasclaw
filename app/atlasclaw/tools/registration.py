@@ -84,6 +84,37 @@ _TOOL_REGISTRY: dict[str, tuple[ToolMetadata, str, str]] = {
         "app.atlasclaw.tools.ui.browser_tool",
         "browser_tool",
     ),
+    "atlasclaw_catalog_query": (
+        ToolMetadata(
+            name="atlasclaw_catalog_query",
+            description="Query AtlasClaw runtime catalogs for available providers, skills, tools, and groups",
+            group="catalog",
+            planner_visibility="general",
+            aliases=["catalog", "skills catalog", "tool catalog", "provider catalog", "runtime catalog"],
+            keywords=[
+                "available skills",
+                "available tools",
+                "providers",
+                "catalog",
+                "capabilities",
+                "可用技能",
+                "可用工具",
+                "能力目录",
+                "技能目录",
+            ],
+            use_when=[
+                "User asks what AtlasClaw can use, expose, or support at runtime",
+                "User asks which skills or tools are available for a specific provider",
+                "User asks for current provider, skill, tool, or group catalog information",
+            ],
+            avoid_when=[
+                "The user wants to execute an external provider action rather than inspect the runtime catalog",
+            ],
+            result_mode="tool_only_ok",
+        ),
+        "app.atlasclaw.tools.runtime.catalog_query_tool",
+        "atlasclaw_catalog_query_tool",
+    ),
     # Session tools
     "sessions_list": (
         ToolMetadata(
@@ -277,6 +308,7 @@ def _resolve_builtin_capability_class(tool_name: str, tool_meta: ToolMetadata) -
         "web_fetch": "web_fetch",
         "openmeteo_weather": "weather",
         "browser": "browser",
+        "atlasclaw_catalog_query": "atlasclaw_catalog",
     }
     if tool_name in explicit_by_name:
         return explicit_by_name[tool_name]

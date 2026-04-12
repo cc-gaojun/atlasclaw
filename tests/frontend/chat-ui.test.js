@@ -912,6 +912,49 @@ describe('chat-ui.js handler mode', () => {
         await handlerPromise;
     });
 
+    test('handler strips plain answer heading from final markdown', async () => {
+        const { initChat } = await import('../../app/frontend/scripts/chat-ui.js');
+        const element = createChatElement();
+        const signals = createMockSignals();
+
+        global.fetch.mockResolvedValueOnce({
+            ok: true,
+            json: () => Promise.resolve({ session_key: 'session-123' })
+        }).mockResolvedValueOnce({
+            ok: true,
+            json: () => Promise.resolve({})
+        });
+
+        await initChat(element);
+        global.fetch.mockClear();
+
+        global.fetch.mockResolvedValueOnce({
+            ok: true,
+            json: () => Promise.resolve({ run_id: 'run-plain-answer-heading' })
+        });
+
+        const handlerPromise = element.handler(
+            { messages: [{ text: 'plain answer heading', role: 'user' }] },
+            signals
+        );
+
+        await new Promise(r => setTimeout(r, 100));
+        const stream = MockEventSource.instances[0];
+        stream.simulateEvent('assistant', {
+            text: 'Answer\n\n- 第一项\n- 第二项',
+            is_delta: true
+        });
+        await new Promise(r => setTimeout(r, 160));
+
+        const htmlPayload = signals.onResponse.mock.calls.at(-1)?.[0]?.html || '';
+        expect(htmlPayload).not.toContain('>Answer<');
+        expect(htmlPayload).toContain('<li>第一项</li>');
+        expect(htmlPayload).toContain('<li>第二项</li>');
+
+        stream.simulateEvent('lifecycle', { phase: 'end' });
+        await handlerPromise;
+    });
+
     test('handler hides answered runtime rows even if backend sends capitalized state', async () => {
         const { initChat } = await import('../../app/frontend/scripts/chat-ui.js');
         const element = createChatElement();
@@ -1004,6 +1047,50 @@ describe('chat-ui.js handler mode', () => {
             const htmlPayload = signals.onResponse.mock.calls.at(-1)?.[0]?.html || '';
             expect(htmlPayload).toContain('Still waiting for model tool decision.');
 
+            stream.simulateEvent('lifecycle', { phase: 'end' });
+            await jest.advanceTimersByTimeAsync(300);
+            await handlerPromise;
+        } finally {
+            jest.useRealTimers();
+        }
+    });
+
+    test('handler seeds early runtime phases before backend runtime arrives', async () => {
+        jest.useFakeTimers();
+        try {
+            const { initChat } = await import('../../app/frontend/scripts/chat-ui.js');
+            const element = createChatElement();
+            const signals = createMockSignals();
+
+            global.fetch.mockResolvedValueOnce({
+                ok: true,
+                json: () => Promise.resolve({ session_key: 'session-123' })
+            }).mockResolvedValueOnce({
+                ok: true,
+                json: () => Promise.resolve({})
+            });
+
+            await initChat(element);
+            global.fetch.mockClear();
+
+            global.fetch.mockResolvedValueOnce({
+                ok: true,
+                json: () => Promise.resolve({ run_id: 'run-seeded-runtime-phases' })
+            });
+
+            const handlerPromise = element.handler(
+                { messages: [{ text: 'cmp pending', role: 'user' }] },
+                signals
+            );
+
+            await jest.advanceTimersByTimeAsync(700);
+
+            const htmlPayload = signals.onResponse.mock.calls.at(-1)?.[0]?.html || '';
+            expect(htmlPayload).toContain('Preparing model request context.');
+            expect(htmlPayload).toContain('Starting model session.');
+            expect(htmlPayload).toContain('Waiting for model tool decision.');
+
+            const stream = MockEventSource.instances[0];
             stream.simulateEvent('lifecycle', { phase: 'end' });
             await jest.advanceTimersByTimeAsync(300);
             await handlerPromise;

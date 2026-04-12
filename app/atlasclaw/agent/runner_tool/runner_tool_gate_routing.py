@@ -1307,14 +1307,32 @@ class RunnerToolGateRoutingMixin:
                 if str(capability).strip()
             ]
         )
-        preferred_tool_names = self._dedupe_preserve_order(
-            [
-                str(name).strip()
-                for item in provider_top + skill_top + tool_top
-                for name in (item.get("tool_names", []) or [])
-                if str(name).strip() in tool_name_set
-            ]
-        )[:12]
+        tool_name_scores: dict[str, tuple[int, int, str]] = {}
+        for item in provider_top + skill_top + tool_top:
+            score = int(item.get("score", 0) or 0)
+            hint_type = "tool"
+            hint_id = str(item.get("hint_id", "") or "").strip()
+            if hint_id.startswith("provider:"):
+                hint_type = "provider"
+            elif hint_id.startswith("skill:"):
+                hint_type = "skill"
+            source_rank = {"tool": 0, "skill": 1, "provider": 2}.get(hint_type, 3)
+            for name in (item.get("tool_names", []) or []):
+                tool_name = str(name).strip()
+                if not tool_name or tool_name not in tool_name_set:
+                    continue
+                current = tool_name_scores.get(tool_name)
+                candidate = (score, -source_rank, hint_id)
+                if current is None or candidate > current:
+                    tool_name_scores[tool_name] = candidate
+
+        preferred_tool_names = [
+            item[0]
+            for item in sorted(
+                tool_name_scores.items(),
+                key=lambda pair: (-pair[1][0], -pair[1][1], pair[0].lower()),
+            )
+        ][:12]
 
         total_score = sum(int(item.get("score", 0) or 0) for item in provider_top + skill_top + tool_top)
         confidence_denominator = max(24, len(request_tokens) * 8)

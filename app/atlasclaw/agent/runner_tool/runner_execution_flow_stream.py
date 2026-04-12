@@ -40,6 +40,7 @@ class RunnerExecutionFlowStreamMixin:
         persist_run_output_start_index = int(state.get("persist_run_output_start_index") or 0)
         synthetic_tool_messages = list(state.get("synthetic_tool_messages") or [])
         first_node_seen = False
+        first_node_wait_tick = 0
 
         _log_step("agent_first_node_wait_start")
         yield StreamEvent.runtime_update(
@@ -56,11 +57,18 @@ class RunnerExecutionFlowStreamMixin:
         while not first_node_seen:
             done, _ = await asyncio.wait({first_node_task}, timeout=5.0)
             if first_node_task not in done:
+                first_node_wait_tick += 1
                 yield StreamEvent.runtime_update(
                     "reasoning",
-                    "Waiting for model tool decision.",
+                    "Still waiting for model tool decision."
+                    if first_node_wait_tick >= 1
+                    else "Waiting for model tool decision.",
                     metadata={
-                        "phase": "agent_first_node_wait",
+                        "phase": (
+                            "agent_first_node_wait_progress"
+                            if first_node_wait_tick >= 1
+                            else "agent_first_node_wait"
+                        ),
                         "elapsed": round(time.monotonic() - start_time, 1),
                     },
                 )

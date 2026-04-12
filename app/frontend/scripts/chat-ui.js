@@ -3,11 +3,11 @@
  * Configure DeepChat component integration with AtlasClaw API
  */
 
-import { getSessionKey, initSession, setSessionKey } from './session-manager.js'
-import { getAgentInfo, getSessionHistory } from './api-client.js'
-import { createStreamHandler } from './stream-handler.js'
-import { buildApiUrl } from './config.js'
-import { t, isLocaleLoaded, getCurrentLocale } from './i18n.js'
+import { getSessionKey, initSession, setSessionKey } from './session-manager.js?v=18'
+import { getAgentInfo, getSessionHistory } from './api-client.js?v=18'
+import { createStreamHandler } from './stream-handler.js?v=18'
+import { buildApiUrl } from './config.js?v=18'
+import { t, isLocaleLoaded, getCurrentLocale } from './i18n.js?v=18'
 
 let chatElement = null
 let currentStreamHandler = null
@@ -407,6 +407,27 @@ const RUNTIME_STATE_LABELS = {
   failed: 'Failed'
 }
 
+const EARLY_RUNTIME_PHASES = [
+  {
+    delayMs: 120,
+    state: 'reasoning',
+    message: 'Preparing model request context.',
+    metadata: { phase: 'model_message_history_build' }
+  },
+  {
+    delayMs: 260,
+    state: 'reasoning',
+    message: 'Starting model session.',
+    metadata: { phase: 'agent_iter_open' }
+  },
+  {
+    delayMs: 420,
+    state: 'reasoning',
+    message: 'Waiting for model tool decision.',
+    metadata: { phase: 'agent_first_node_wait' }
+  }
+]
+
 function buildThinkingHtml(thinkingContent, elapsedSeconds = null, isThinking = false) {
   if (!thinkingContent) return ''
   return `<div class="thinking-body"><div class="thinking-caption">Model thinking</div><div class="thinking-content-text">${escapeHtmlWithBreaks(thinkingContent)}</div></div>`
@@ -473,7 +494,7 @@ function formatElapsed(elapsedMs) {
   return `${(elapsedMs / 1000).toFixed(1)}s`
 }
 
-function buildMessageContent(runtimeEntries, thinkingContent, responseContent, elapsedMs = null, isThinking = false, panelOpen = null, isComplete = false) {
+function buildMessageContent(runtimeEntries, thinkingContent, responseContent, elapsedMs = null, isThinking = false, panelOpen = null, isComplete = false, renderRevision = 0) {
   const runtimeHtml = buildRuntimePanel(runtimeEntries, thinkingContent, elapsedMs, isThinking, panelOpen, isComplete)
   const responseHtml = responseContent
     ? `<div class="response-content">${renderAssistantMarkdown(responseContent)}</div>`
@@ -481,7 +502,9 @@ function buildMessageContent(runtimeEntries, thinkingContent, responseContent, e
   if (!runtimeHtml && !responseHtml) {
     return { html: '' }
   }
-  return { html: `<div class="message-wrapper">${runtimeHtml}${responseHtml}</div>` }
+  return {
+    html: `<div class="message-wrapper" data-render-revision="${renderRevision}">${runtimeHtml}${responseHtml}</div>`
+  }
 }
 
 function escapeHtml(text) {
@@ -521,6 +544,9 @@ function stripWrapperHeading(text) {
     if (wrapperPattern.test(headingText)) {
       return lines.slice(1).join('\n').replace(/^\s+/, '')
     }
+  }
+  if (wrapperPattern.test(firstLine)) {
+    return lines.slice(1).join('\n').replace(/^\s+/, '')
   }
   return normalized
 }
@@ -653,6 +679,9 @@ async function handleStreamWithSignals(runId, signals, context) {
   let runtimePanelOpen = null
   let runtimeEntries = [{ state: 'reasoning', message: 'Starting response analysis.' }]
   let finalAnswerReady = false
+  let serverRuntimeSeen = false
+  let localRuntimeSeedTimers = []
+  let renderRevision = 0
 
   function currentElapsedMs() {
     if (runStartTime) {
@@ -692,6 +721,30 @@ async function handleStreamWithSignals(runId, signals, context) {
       return
     }
     runtimeEntries = [...runtimeEntries, nextEntry]
+  }
+
+  function clearLocalRuntimeSeedTimers() {
+    for (const timerId of localRuntimeSeedTimers) {
+      clearTimeout(timerId)
+    }
+    localRuntimeSeedTimers = []
+  }
+
+  function scheduleLocalEarlyRuntimePhases() {
+    clearLocalRuntimeSeedTimers()
+    localRuntimeSeedTimers = EARLY_RUNTIME_PHASES.map((phase) => setTimeout(() => {
+      if (serverRuntimeSeen || finalAnswerReady) return
+      pushRuntimeEntry(
+        phase.state,
+        phase.message,
+        {
+          ...(phase.metadata || {}),
+          elapsed: currentElapsedMs() / 1000,
+          synthetic: true
+        }
+      )
+      updateUI()
+    }, phase.delayMs))
   }
 
   function refreshActiveRuntimeEntry() {
@@ -755,6 +808,7 @@ async function handleStreamWithSignals(runId, signals, context) {
 
   function updateUI() {
     try {
+      renderRevision += 1
       const panelShouldOpen = currentPanelShouldOpen()
       const content = buildMessageContent(
         runtimeEntries,
@@ -763,7 +817,8 @@ async function handleStreamWithSignals(runId, signals, context) {
         currentElapsedMs(),
         !thinkingFinalized,
         panelShouldOpen,
-        finalAnswerReady
+        finalAnswerReady,
+        renderRevision
       )
       if (content.html) {
         signals.onResponse({ html: content.html, overwrite: true })
@@ -823,6 +878,7 @@ async function handleStreamWithSignals(runId, signals, context) {
   }
 
   return new Promise((resolve) => {
+    scheduleLocalEarlyRuntimePhases()
     startRunTimer()
     currentStreamHandler = createStreamHandler(runId, {
       onStart: () => {
@@ -887,6 +943,8 @@ async function handleStreamWithSignals(runId, signals, context) {
         updateUI()
       },
       onRuntime: (data) => {
+        serverRuntimeSeen = true
+        clearLocalRuntimeSeedTimers()
         pushRuntimeEntry(data.state, data.message, data.metadata || {})
         updateUI()
       },
@@ -896,6 +954,7 @@ async function handleStreamWithSignals(runId, signals, context) {
       },
       onEnd: () => {
         const doFinalRender = async () => {
+          clearLocalRuntimeSeedTimers()
           assistantUpdatePending = false
           thinkingFinalized = true
           stopThinkingTimer()
@@ -918,6 +977,7 @@ async function handleStreamWithSignals(runId, signals, context) {
         }, 200)
       },
       onError: async (error) => {
+        clearLocalRuntimeSeedTimers()
         thinkingFinalized = true
         stopThinkingTimer()
         pushRuntimeEntry('failed', error?.message || 'Unknown error', { phase: 'error' })

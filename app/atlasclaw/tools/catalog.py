@@ -12,6 +12,7 @@ GROUP_RUNTIME = "group:runtime"
 GROUP_WEB = "group:web"
 GROUP_AUTOMATION = "group:automation"
 GROUP_ATLASCLAW = "group:atlasclaw"
+GROUP_CATALOG = "group:catalog"
 GROUP_MEMORY = "group:memory"
 GROUP_SESSIONS = "group:sessions"
 GROUP_UI = "group:ui"
@@ -24,6 +25,7 @@ GROUP_TOOLS: dict[str, list[str]] = {
     GROUP_WEB: ["web_search", "web_fetch", "openmeteo_weather"],
     GROUP_UI: ["browser"],
     GROUP_AUTOMATION: [],
+    GROUP_CATALOG: ["atlasclaw_catalog_query"],
     GROUP_MEMORY: ["memory_search", "memory_get"],
     GROUP_SESSIONS: [
         "sessions_list",
@@ -55,6 +57,7 @@ GROUP_TOOLS[GROUP_ATLASCLAW] = _dedupe(
         *GROUP_TOOLS[GROUP_WEB],
         *GROUP_TOOLS[GROUP_UI],
         *GROUP_TOOLS[GROUP_AUTOMATION],
+        *GROUP_TOOLS[GROUP_CATALOG],
         *GROUP_TOOLS[GROUP_MEMORY],
         *GROUP_TOOLS[GROUP_SESSIONS],
         *GROUP_TOOLS[GROUP_PROVIDERS],
