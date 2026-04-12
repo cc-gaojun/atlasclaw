@@ -12,6 +12,7 @@ from app.atlasclaw.auth.guards import (
     AuthorizationContext,
     ensure_permission,
     get_authorization_context,
+    require_admin,
 )
 from app.atlasclaw.db import get_db_session_dependency as get_db_session
 from app.atlasclaw.db.models import ModelConfigModel
